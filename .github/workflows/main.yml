@@ -1,236 +1,87 @@
-
-name: Windows RDP + Tailscale + Ollama AI
-
+name: Android Ollama over Tailscale
 on:
   workflow_dispatch:
-
 permissions:
   contents: read
-
 jobs:
   ai-vm:
     runs-on: windows-2022
     timeout-minutes: 350
-
     steps:
-      - name: Checkout chat app
-        uses: actions/checkout@v4
-
-      - name: Setup RDP
+      - name: Install and authenticate Tailscale
         shell: powershell
+        env:
+          TS_AUTHKEY: ${{ secrets.TAILSCALE_AUTHKEY }}
         run: |
           $ErrorActionPreference = "Stop"
-
-          # Enable RDP
-          $base = "HKLM:\System\CurrentControlSet\Control\Terminal Server"
-          $rdp = "$base\WinStations\RDP-Tcp"
-
-          Set-ItemProperty -Path $base `
-            -Name fDenyTSConnections -Value 0
-
-          # Keep authentication protections enabled
-          Set-ItemProperty -Path $rdp `
-            -Name UserAuthentication -Value 1
-
-          Set-ItemProperty -Path $rdp `
-            -Name SecurityLayer -Value 2
-
-          # Disable general RDP firewall access
-          Get-NetFirewallRule -DisplayGroup "Remote Desktop" `
-            -ErrorAction SilentlyContinue |
-            Disable-NetFirewallRule
-
-          # Create user with random password
-          $bytes = New-Object byte[] 24
-          $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
-          $rng.GetBytes($bytes)
-          $rng.Dispose()
-
-          $password = "Ai!" + [Convert]::ToBase64String($bytes)
-          $secure = ConvertTo-SecureString `
-            $password -AsPlainText -Force
-
-          New-LocalUser `
-            -Name "RDP" `
-            -Password $secure `
-            -AccountNeverExpires
-
-          Add-LocalGroupMember `
-            -Group "Remote Desktop Users" `
-            -Member "RDP"
-
-          "RDP_PASSWORD=$password" >> $env:GITHUB_ENV
-
-          Write-Host "RDP account configured!"
-
-      - name: Install Tailscale
-        shell: powershell
-        run: |
-          $ErrorActionPreference = "Stop"
-
-          # Download current official MSI
-          $url = "https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi"
+          $ProgressPreference = "SilentlyContinue"
+          if (-not $env:TS_AUTHKEY) { throw "Missing GitHub repository secret TAILSCALE_AUTHKEY" }
           $file = "$env:TEMP\tailscale.msi"
-
-          Invoke-WebRequest -Uri $url -OutFile $file
-
-          $p = Start-Process msiexec.exe `
-            -ArgumentList "/i `"$file`" /quiet /norestart" `
-            -Wait -PassThru
-
-          if ($p.ExitCode -notin @(0,3010)) {
-            throw "Tailscale installation failed"
-          }
-
-          Write-Host "Tailscale installed!"
-
-      - name: Login To Tailscale
-        shell: powershell
-        run: |
-          $ErrorActionPreference = "Stop"
-
+          Invoke-WebRequest "https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi" -OutFile $file
+          $installer = Start-Process msiexec.exe -ArgumentList @("/i", $file, "/quiet", "/norestart") -Wait -PassThru
+          if ($installer.ExitCode -notin @(0,3010)) { throw "Tailscale installation failed" }
           $ts = "$env:ProgramFiles\Tailscale\tailscale.exe"
-
-          Write-Host "===================================="
-          Write-Host "OPEN THE TAILSCALE LOGIN URL BELOW"
-          Write-Host "===================================="
-
-          # Interactive authentication
-          & $ts up `
-            --hostname="ai-vm-$env:GITHUB_RUN_ID" `
-            --unattended
-
-          if ($LASTEXITCODE -ne 0) {
-            throw "Tailscale login failed"
-          }
-
-          $ip = $null
-
-          for ($i = 0; $i -lt 30; $i++) {
-            $ip = (& $ts ip -4 | Select-Object -First 1)
-
-            if ($ip) {
-              break
-            }
-
-            Start-Sleep -Seconds 3
-          }
-
-          if (-not $ip) {
-            throw "No Tailscale IP"
-          }
-
-          # Find the interface actually assigned the Tailscale address
-          $adapter = Get-NetIPAddress -AddressFamily IPv4 |
-            Where-Object { $_.IPAddress -eq $ip } |
-            Select-Object -First 1
-
-          if (-not $adapter) {
-            throw "Tailscale network adapter not found"
-          }
-
-          # Permit RDP only through the connected Tailscale adapter
-          New-NetFirewallRule `
-            -DisplayName "RDP over Tailscale" `
-            -Direction Inbound `
-            -Action Allow `
-            -Protocol TCP `
-            -LocalPort 3389 `
-            -InterfaceAlias $adapter.InterfaceAlias `
-            -RemoteAddress "100.64.0.0/10" `
-            -ErrorAction Stop
-
+          & $ts up --authkey="$env:TS_AUTHKEY" --hostname="ollama-$env:GITHUB_RUN_ID" --unattended
+          if ($LASTEXITCODE -ne 0) { throw "Tailscale authentication failed" }
+          $ip = (& $ts ip -4 | Select-Object -First 1)
+          if (-not $ip -or $ip -notmatch '^100\.') { throw "Missing Tailscale IP" }
           "TAILSCALE_IP=$ip" >> $env:GITHUB_ENV
+          Write-Host "Tailscale IP: $ip"
 
-          Write-Host "Tailscale connected!"
-          Write-Host "IP: $ip"
-
-      - name: Install Ollama for all VM users
+      - name: Install Ollama in shared directory
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
           $ProgressPreference = "SilentlyContinue"
-
           $settings = @{
-            CUDA_VISIBLE_DEVICES = "-1"
-            OLLAMA_NUM_PARALLEL = "1"
-            OLLAMA_MAX_LOADED_MODELS = "1"
-            OLLAMA_CONTEXT_LENGTH = "2048"
-            OLLAMA_KEEP_ALIVE = "15m"
-            OLLAMA_HOST = "127.0.0.1:11434"
-            OLLAMA_MODELS = "C:\AI\Models"
+            CUDA_VISIBLE_DEVICES="-1"
+            HIP_VISIBLE_DEVICES="-1"
+            OLLAMA_NUM_PARALLEL="1"
+            OLLAMA_MAX_LOADED_MODELS="1"
+            OLLAMA_CONTEXT_LENGTH="2048"
+            OLLAMA_KEEP_ALIVE="30m"
+            OLLAMA_HOST="$($env:TAILSCALE_IP):11434"
+            OLLAMA_MODELS="C:\AI\Models"
           }
           foreach ($key in $settings.Keys) {
             [Environment]::SetEnvironmentVariable($key,$settings[$key],"Machine")
             Set-Item -Path "Env:$key" -Value $settings[$key]
           }
-
-          Write-Host "Installing official Ollama..."
           irm https://ollama.com/install.ps1 | iex
-
-          $paths = @("$env:LOCALAPPDATA\Programs\Ollama","$env:ProgramFiles\Ollama")
-          $source = $paths | Where-Object { Test-Path (Join-Path $_ "ollama.exe") } | Select-Object -First 1
-          if (-not $source) { throw "Ollama executable missing after install" }
-
-          New-Item -ItemType Directory -Path "C:\Ollama" -Force | Out-Null
-          Copy-Item -Path "$source\*" -Destination "C:\Ollama" -Recurse -Force
-          New-Item -ItemType Directory -Path "C:\AI\Models" -Force | Out-Null
+          $sources = @("$env:LOCALAPPDATA\Programs\Ollama","$env:ProgramFiles\Ollama")
+          $source = $sources | Where-Object { Test-Path (Join-Path $_ "ollama.exe") } | Select-Object -First 1
+          if (-not $source) { throw "Ollama installation missing" }
+          New-Item -ItemType Directory "C:\Ollama" -Force | Out-Null
+          Copy-Item "$source\*" "C:\Ollama" -Recurse -Force
+          New-Item -ItemType Directory "C:\AI\Models" -Force | Out-Null
           $ollama = "C:\Ollama\ollama.exe"
           if (-not (Test-Path $ollama)) { throw "Shared executable missing" }
+          Get-Process -Name "ollama" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 
-          # Prevent the installer's own server from conflicting with the shared one
-          Get-Process ollama -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+          $adapter = Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -eq $env:TAILSCALE_IP } | Select-Object -First 1
+          if (-not $adapter) { throw "Tailscale adapter missing" }
+          New-NetFirewallRule -DisplayName "AI API via Tailscale" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 11434 -InterfaceAlias $adapter.InterfaceAlias -RemoteAddress "100.64.0.0/10" -ErrorAction Stop | Out-Null
+
           Start-Process -FilePath $ollama -ArgumentList "serve" -WindowStyle Hidden
-
-          $ready=$false
+          $api = "http://$($env:TAILSCALE_IP):11434"
+          $ready = $false
           for ($i=0; $i -lt 60; $i++) {
             try {
-              Invoke-RestMethod "http://127.0.0.1:11434/api/tags" -TimeoutSec 3 | Out-Null
-              $ready=$true
+              Invoke-RestMethod "$api/api/tags" -TimeoutSec 3 | Out-Null
+              $ready = $true
               break
             } catch { Start-Sleep -Seconds 2 }
           }
-          if (-not $ready) { throw "Ollama failed to start" }
-
+          if (-not $ready) { throw "Ollama server did not start" }
           & $ollama pull qwen3:4b
-          if ($LASTEXITCODE -ne 0) { throw "Model download failed" }
-          & $ollama list
-          if ($LASTEXITCODE -ne 0) { throw "Model verification failed" }
-          Write-Host "Shared Ollama ready!"
-
-      - name: Start private Android AI chat
-        shell: powershell
-        run: |
-          $ErrorActionPreference = "Stop"
-          $app = Join-Path $env:GITHUB_WORKSPACE "agent_web.py"
-          if (-not (Test-Path $app)) { throw "Missing agent_web.py" }
-          $python = (Get-Command python.exe -ErrorAction Stop).Source
-          Start-Process -FilePath $python -ArgumentList ('"' + $app + '"') -WorkingDirectory $env:GITHUB_WORKSPACE -WindowStyle Hidden
-
-          $ready=$false
-          for ($i=0; $i -lt 30; $i++) {
-            try {
-              Invoke-RestMethod "http://127.0.0.1:8765/health" -TimeoutSec 3 | Out-Null
-              $ready=$true
-              break
-            } catch { Start-Sleep -Seconds 2 }
-          }
-          if (-not $ready) { throw "Chat service failed to start" }
-
-          $ts = "$env:ProgramFiles\Tailscale\tailscale.exe"
-          & $ts serve --bg http://127.0.0.1:8765
-          if ($LASTEXITCODE -ne 0) { throw "Tailscale Serve failed" }
-
-          Write-Host "====== ANDROID CHAT ADDRESS ======"
-          & $ts serve status
-          Write-Host "=================================="
-          Write-Host "CMD: C:\Ollama\ollama.exe run qwen3:4b"
-          Write-Host "RDP IP: $env:TAILSCALE_IP"
-          Write-Host "RDP Username: RDP"
-          Write-Host "RDP Password: $env:RDP_PASSWORD"
-
+          if ($LASTEXITCODE -ne 0) { throw "Model pull failed" }
+          Write-Host "========================================"
+          Write-Host "ANDROID APP SERVER URL: $api"
+          Write-Host "MODEL: qwen3:4b"
+          Write-Host "Ollama executable: C:\Ollama\ollama.exe"
+          Write-Host "========================================"
           while ($true) {
             Start-Sleep -Seconds 300
-            if (-not (Get-Process ollama -ErrorAction SilentlyContinue)) { throw "Ollama server stopped" }
-            Write-Host "Private chat is active"
+            if (-not (Get-Process ollama -ErrorAction SilentlyContinue)) { throw "Ollama stopped" }
+            Write-Host "Ollama API running"
           }
