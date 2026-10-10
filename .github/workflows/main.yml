@@ -63,6 +63,31 @@ jobs:
           if (-not $adapter) { throw "Tailscale adapter missing" }
           New-NetFirewallRule -DisplayName "AI API via Tailscale" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 11434 -InterfaceAlias $adapter.InterfaceAlias -RemoteAddress "100.64.0.0/10" -ErrorAction Stop | Out-Null
 
+          # Apply CPU thread tuning only when the benchmark demonstrated
+          # at least a 10% improvement over the same model's default setting.
+          if (Test-Path "CPU_TUNING.json") {
+            try {
+              $tuning = Get-Content "CPU_TUNING.json" -Raw | ConvertFrom-Json
+              $wanted = "qwen2.5-coder:1.5b"
+              if (Test-Path "selected-model.txt") {
+                $selected = (Get-Content "selected-model.txt" -Raw).Trim()
+                if ($selected -match "3b") { $wanted = "qwen2.5-coder:3b" }
+              }
+              $best = if ($wanted -eq "qwen2.5-coder:3b") { $tuning.best_3b } else { $tuning.best_1_5b }
+              $default = $tuning.rows | Where-Object {
+                $_.model -eq $wanted -and $null -eq $_.threads -and $_.status -eq "OK"
+              } | Select-Object -First 1
+              if ($null -ne $best -and $null -ne $default -and
+                  $null -ne $best.threads -and [int]$best.threads -gt 0 -and
+                  [double]$best.tps -gt 1.10 * [double]$default.tps) {
+                $env:LLAMA_ARG_THREADS = [string]$best.threads
+                Write-Host "Applying measured CPU thread setting: $env:LLAMA_ARG_THREADS"
+              }
+            } catch {
+              Write-Host "CPU tuning config unavailable; continuing with Ollama defaults."
+            }
+          }
+
           Start-Process -FilePath $ollama -ArgumentList "serve" -WindowStyle Hidden
           $api = "http://$($env:TAILSCALE_IP):11434"
           $ready = $false
