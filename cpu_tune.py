@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compare CPU throughput of standard Qwen2.5 Coder 1.5B and 3B without running generated code."""
+"""Compare standard Qwen2.5 Coder 1.5B vs 3B on real allocated runner CPUs. Generated code is never executed."""
 import ast
 import datetime as dt
 import json
