@@ -37,16 +37,6 @@ jobs:
             -ErrorAction SilentlyContinue |
             Disable-NetFirewallRule
 
-          # Permit RDP only through the Tailscale adapter
-          New-NetFirewallRule `
-            -DisplayName "RDP over Tailscale" `
-            -Direction Inbound `
-            -Action Allow `
-            -Protocol TCP `
-            -LocalPort 3389 `
-            -InterfaceAlias "Tailscale" `
-            -ErrorAction Stop
-
           # Create user with random password
           $bytes = New-Object byte[] 24
           $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
@@ -126,6 +116,26 @@ jobs:
           if (-not $ip) {
             throw "No Tailscale IP"
           }
+
+          # Find the interface actually assigned the Tailscale address
+          $adapter = Get-NetIPAddress -AddressFamily IPv4 |
+            Where-Object { $_.IPAddress -eq $ip } |
+            Select-Object -First 1
+
+          if (-not $adapter) {
+            throw "Tailscale network adapter not found"
+          }
+
+          # Permit RDP only through the connected Tailscale adapter
+          New-NetFirewallRule `
+            -DisplayName "RDP over Tailscale" `
+            -Direction Inbound `
+            -Action Allow `
+            -Protocol TCP `
+            -LocalPort 3389 `
+            -InterfaceAlias $adapter.InterfaceAlias `
+            -RemoteAddress "100.64.0.0/10" `
+            -ErrorAction Stop
 
           "TAILSCALE_IP=$ip" >> $env:GITHUB_ENV
 
