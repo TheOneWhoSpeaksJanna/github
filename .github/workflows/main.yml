@@ -1,4 +1,5 @@
-name: win 11 + tailscale + Download.bat script 
+
+name: Windows RDP + Tailscale + Huihui Qwen3 AI
 
 on:
   workflow_dispatch:
@@ -9,125 +10,303 @@ jobs:
     timeout-minutes: 350
 
     steps:
-      - name: Configure Core RDP Settings
+      - name: Configure Secure RDP
+        shell: powershell
         run: |
-          # Enable Remote Desktop and disable Network Level Authentication (if needed)
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
-                             -Name "fDenyTSConnections" -Value 0 -Force
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
-                             -Name "UserAuthentication" -Value 0 -Force
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
-                             -Name "SecurityLayer" -Value 0 -Force
+          $ErrorActionPreference = "Stop"
 
-          # Remove any existing rule with the same name to avoid duplication
-          netsh advfirewall firewall delete rule name="RDP-Tailscale"
-         
-          # For testing, allow any incoming connection on port 3389
-          netsh advfirewall firewall add rule name="RDP-Tailscale" `
-            dir=in action=allow protocol=TCP localport=3389
+          # Enable Remote Desktop
+          Set-ItemProperty `
+            -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
+            -Name fDenyTSConnections -Value 0
 
-          # (Optional) Restart the Remote Desktop service to ensure changes take effect
-          Restart-Service -Name TermService -Force
+          # Require Network Level Authentication
+          Set-ItemProperty `
+            -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
+            -Name UserAuthentication -Value 1
 
-      - name: Create RDP User with Fixed Password
+          # Require TLS security
+          Set-ItemProperty `
+            -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
+            -Name SecurityLayer -Value 2
+
+          # Restrict RDP to Tailscale IPv4 addresses
+          Get-NetFirewallRule -Name "AI-Tailscale-RDP" `
+            -ErrorAction SilentlyContinue |
+            Remove-NetFirewallRule
+
+          New-NetFirewallRule `
+            -Name "AI-Tailscale-RDP" `
+            -DisplayName "AI Tailscale RDP" `
+            -Direction Inbound `
+            -Action Allow `
+            -Protocol TCP `
+            -LocalPort 3389 `
+            -RemoteAddress "100.64.0.0/10"
+
+          # Disable pre-existing general RDP allow rules
+          Get-NetFirewallRule -Direction Inbound -Action Allow |
+            Where-Object {
+              $_.DisplayGroup -eq "Remote Desktop"
+            } |
+            Disable-NetFirewallRule
+
+          Set-Service TermService -StartupType Automatic
+          Start-Service TermService -ErrorAction SilentlyContinue
+
+      - name: Create RDP Account
+        shell: powershell
         run: |
-          $password = "MR.English2008"
-          $securePass = ConvertTo-SecureString $password -AsPlainText -Force
-          if (-not (Get-LocalUser -Name "RDP" -ErrorAction SilentlyContinue)) {
-              New-LocalUser -Name "RDP" -Password $securePass -AccountNeverExpires
-          }
-          Add-LocalGroupMember -Group "Administrators" -Member "RDP"
-          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDP"
-         
-          echo "RDP_CREDS=User: RDP | Password: $password" >> $env:GITHUB_ENV
-         
-          if (-not (Get-LocalUser -Name "RDP")) {
-              Write-Error "User creation failed"
-              exit 1
-          }
+          $ErrorActionPreference = "Stop"
+
+          # Generate a different password on every run
+          $bytes = New-Object byte[] 24
+          $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+          $rng.GetBytes($bytes)
+          $rng.Dispose()
+
+          $password = "Ai!" + [Convert]::ToBase64String($bytes)
+
+          $securePass = ConvertTo-SecureString `
+            $password -AsPlainText -Force
+
+          New-LocalUser `
+            -Name "RDP" `
+            -Password $securePass `
+            -AccountNeverExpires `
+            -PasswordNeverExpires
+
+          Add-LocalGroupMember `
+            -Group "Remote Desktop Users" `
+            -Member "RDP"
+
+          # Save credentials for the final step
+          "RDP_PASSWORD=$password" >> $env:GITHUB_ENV
+
+          Write-Host "RDP account created."
 
       - name: Install Tailscale
+        shell: powershell
         run: |
-          $tsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
-          $installerPath = "$env:TEMP\tailscale.msi"
-         
-          Invoke-WebRequest -Uri $tsUrl -OutFile $installerPath
-          Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/norestart" -Wait
-          Remove-Item $installerPath -Force
+          $ErrorActionPreference = "Stop"
 
-      - name: Establish Tailscale Connection
-        run: |
-          # Bring up Tailscale with the provided auth key and set a unique hostname
-          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTHKEY }} --hostname=gh-runner-$env:GITHUB_RUN_ID
-         
-          # Wait for Tailscale to assign an IP
-          $tsIP = $null
-          $retries = 0
-          while (-not $tsIP -and $retries -lt 10) {
-              $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
-              Start-Sleep -Seconds 5
-              $retries++
-          }
-         
-          if (-not $tsIP) {
-              Write-Error "Tailscale IP not assigned. Exiting."
-              exit 1
-          }
-          echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
-     
-      - name: Verify RDP Accessibility
-        run: |
-          Write-Host "Tailscale IP: $env:TAILSCALE_IP"
-         
-          # Test connectivity using Test-NetConnection against the Tailscale IP on port 3389
-          $testResult = Test-NetConnection -ComputerName $env:TAILSCALE_IP -Port 3389
-          if (-not $testResult.TcpTestSucceeded) {
-              Write-Error "TCP connection to RDP port 3389 failed"
-              exit 1
-          }
-          Write-Host "TCP connectivity successful!"
+          $url = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
+          $file = "$env:TEMP\tailscale.msi"
 
-      - name: Maintain Connection + Watch RDP User
+          Invoke-WebRequest -Uri $url -OutFile $file
+
+          $process = Start-Process msiexec.exe `
+            -ArgumentList "/i `"$file`" /quiet /norestart" `
+            -Wait -PassThru
+
+          if ($process.ExitCode -notin @(0, 3010)) {
+            throw "Tailscale installation failed: $($process.ExitCode)"
+          }
+
+          Remove-Item $file -Force
+
+      - name: Connect Tailscale
+        shell: powershell
+        env:
+          TS_AUTHKEY: ${{ secrets.TAILSCALE_AUTHKEY }}
         run: |
-          Write-Host "`n=== RDP ACCESS ==="
-          Write-Host "Address: $env:TAILSCALE_IP"
+          $ErrorActionPreference = "Stop"
+
+          $ts = "$env:ProgramFiles\Tailscale\tailscale.exe"
+
+          if (-not $env:TS_AUTHKEY) {
+            throw "Missing TAILSCALE_AUTHKEY secret"
+          }
+
+          & $ts up `
+            --authkey="$env:TS_AUTHKEY" `
+            --hostname="ai-runner-$env:GITHUB_RUN_ID"
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "Tailscale authentication failed"
+          }
+
+          $ip = $null
+
+          for ($i = 0; $i -lt 20; $i++) {
+            $ip = (& $ts ip -4 | Select-Object -First 1)
+
+            if ($ip) {
+              break
+            }
+
+            Start-Sleep -Seconds 5
+          }
+
+          if (-not $ip) {
+            throw "No Tailscale IP assigned"
+          }
+
+          "TAILSCALE_IP=$ip" >> $env:GITHUB_ENV
+
+          Write-Host "Tailscale connected: $ip"
+
+      - name: Install Ollama CPU Version
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $url = "https://github.com/ollama/ollama/releases/latest/download/ollama-windows-amd64.zip"
+          $zip = "$env:TEMP\ollama.zip"
+          $dir = "C:\Ollama"
+
+          New-Item -ItemType Directory `
+            -Path $dir -Force | Out-Null
+
+          Write-Host "Downloading Ollama..."
+
+          Invoke-WebRequest -Uri $url -OutFile $zip
+
+          Expand-Archive `
+            -Path $zip `
+            -DestinationPath $dir `
+            -Force
+
+          Remove-Item $zip -Force
+
+          $ollama = Join-Path $dir "ollama.exe"
+
+          if (-not (Test-Path $ollama)) {
+            throw "Ollama executable not found"
+          }
+
+          # Configure CPU-only operation
+          $env:CUDA_VISIBLE_DEVICES = "-1"
+          $env:HIP_VISIBLE_DEVICES = "-1"
+          $env:OLLAMA_LLM_LIBRARY = "cpu"
+          $env:OLLAMA_NUM_PARALLEL = "1"
+          $env:OLLAMA_MAX_LOADED_MODELS = "1"
+          $env:OLLAMA_CONTEXT_LENGTH = "2048"
+          $env:OLLAMA_HOST = "127.0.0.1:11434"
+
+          # Make settings persistent across process launches
+          @(
+            "CUDA_VISIBLE_DEVICES=-1"
+            "HIP_VISIBLE_DEVICES=-1"
+            "OLLAMA_LLM_LIBRARY=cpu"
+            "OLLAMA_NUM_PARALLEL=1"
+            "OLLAMA_MAX_LOADED_MODELS=1"
+            "OLLAMA_CONTEXT_LENGTH=2048"
+            "OLLAMA_HOST=127.0.0.1:11434"
+          ) | ForEach-Object {
+            $key, $value = $_ -split "=", 2
+            [Environment]::SetEnvironmentVariable(
+              $key, $value, "Machine"
+            )
+          }
+
+          # Start the local inference server
+          Start-Process `
+            -FilePath $ollama `
+            -ArgumentList "serve" `
+            -WindowStyle Hidden
+
+          # Wait for Ollama API
+          $ready = $false
+
+          for ($i = 0; $i -lt 60; $i++) {
+            try {
+              Invoke-RestMethod `
+                -Uri "http://127.0.0.1:11434/api/tags" `
+                -TimeoutSec 3 | Out-Null
+
+              $ready = $true
+              break
+            }
+            catch {
+              Start-Sleep -Seconds 2
+            }
+          }
+
+          if (-not $ready) {
+            throw "Ollama server failed to start"
+          }
+
+          Write-Host "Ollama server running!"
+
+      - name: Download Exact Huihui Qwen3 Model
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $ollama = "C:\Ollama\ollama.exe"
+
+          # Exact model from the original author
+          $model = "huihui_ai/qwen3-abliterated:4b-v2"
+
+          Write-Host "Downloading Huihui Qwen3 4B Abliterated V2"
+
+          & $ollama pull $model
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "Model download failed"
+          }
+
+          Write-Host "Installed models:"
+          & $ollama list
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "Model verification failed"
+          }
+
+          Write-Host "Model installation completed."
+
+      - name: Verify RDP And AI
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $rdp = Test-NetConnection `
+            -ComputerName $env:TAILSCALE_IP `
+            -Port 3389
+
+          if (-not $rdp.TcpTestSucceeded) {
+            throw "RDP TCP connection failed"
+          }
+
+          $models = Invoke-RestMethod `
+            -Uri "http://127.0.0.1:11434/api/tags"
+
+          $expected = "huihui_ai/qwen3-abliterated:4b-v2"
+
+          if (-not ($models.models | Where-Object {
+            $_.name -eq $expected
+          })) {
+            throw "Expected AI model not installed"
+          }
+
+          Write-Host "RDP TCP check passed."
+          Write-Host "AI model verified."
+
+      - name: Show Connection Information
+        shell: powershell
+        run: |
+          Write-Host ""
+          Write-Host "=================================="
+          Write-Host "        WINDOWS AI SERVER"
+          Write-Host "=================================="
+          Write-Host ""
+          Write-Host "RDP Address: $env:TAILSCALE_IP"
           Write-Host "Username: RDP"
-          Write-Host "Password: $(echo $env:RDP_CREDS)"
-          Write-Host "==================`n"
+          Write-Host "Password: $env:RDP_PASSWORD"
+          Write-Host ""
+          Write-Host "Installed AI:"
+          Write-Host "Huihui Qwen3 4B Abliterated V2"
+          Write-Host ""
+          Write-Host "Ollama command:"
+          Write-Host "C:\Ollama\ollama.exe run huihui_ai/qwen3-abliterated:4b-v2"
+          Write-Host ""
+          Write-Host "AI API:"
+          Write-Host "http://127.0.0.1:11434"
+          Write-Host ""
+          Write-Host "=================================="
 
-          $rdpProfile = "C:\Users\RDP"
-          $startupPath = "$rdpProfile\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup"
-          $downloadUrl = "https://gitlab.com/MR.English2008/pcme_rdp/-/raw/main/Downloads.bat"
-          $downloadPath = "$startupPath\Downloads.bat"
-
+          # Keep the job active until GitHub's limit
           while ($true) {
-              if (Test-Path $rdpProfile) {
-                  try {
-                      if (-not (Test-Path $startupPath)) {
-                          New-Item -ItemType Directory -Path $startupPath -Force | Out-Null
-                      }
-
-                      Invoke-WebRequest -Uri $downloadUrl -OutFile $downloadPath -UseBasicParsing
-                      Write-Host "✅ Downloads.bat copied to $downloadPath"
-
-                      # Run the batch file for the first time
-                      cmd /c $downloadPath
-                      Write-Host "✅ Downloads.bat executed successfully"
-                      break
-                  }
-                  catch {
-                      Write-Host "❌ Error copying or executing Downloads.bat: $($_.Exception.Message)"
-                      break
-                  }
-              }
-              else {
-                  Write-Host "[$(Get-Date)] Waiting for RDP profile to be created..."
-                  Start-Sleep -Seconds 30
-              }
-          }
-
-          # Keep runner alive
-          while ($true) {
-              Write-Host "[$(Get-Date)] RDP Active - Use Ctrl+C in workflow to terminate"
-              Start-Sleep -Seconds 300
+            Start-Sleep -Seconds 300
           }
