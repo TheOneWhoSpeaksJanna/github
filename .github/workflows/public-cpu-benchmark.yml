@@ -1,0 +1,109 @@
+name: Public 4-vCPU Model Speed Test
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  speed-test:
+    runs-on: windows-2022
+    timeout-minutes: 35
+    steps:
+      - name: Show actual runner hardware
+        shell: powershell
+        run: |
+          $cpu = (Get-CimInstance Win32_ComputerSystem).NumberOfLogicalProcessors
+          $ram = [math]::Round((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB, 1)
+          Write-Host "LOGICAL CPUS: $cpu"
+          Write-Host "RAM: $ram GB"
+          "RUNNER LOGICAL CPUS: $cpu; RAM: $ram GB" | Out-File -Append -FilePath $env:GITHUB_STEP_SUMMARY
+
+      - name: Install and benchmark CPU coding models
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $ProgressPreference = "SilentlyContinue"
+          $env:OLLAMA_HOST = "127.0.0.1:11434"
+          $env:OLLAMA_NUM_PARALLEL = "1"
+          $env:OLLAMA_MAX_LOADED_MODELS = "1"
+          $env:OLLAMA_CONTEXT_LENGTH = "2048"
+          $env:CUDA_VISIBLE_DEVICES = "-1"
+
+          # Standalone benchmark: no Tailscale, RDP, secrets, or tokens.
+          irm https://ollama.com/install.ps1 | iex
+          $paths = @("$env:LOCALAPPDATA\Programs\Ollama\ollama.exe", "$env:ProgramFiles\Ollama\ollama.exe")
+          $ollama = $paths | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $ollama) { throw "Ollama not installed" }
+
+          $api = "http://127.0.0.1:11434"
+          $ready = $false
+          try {
+            Invoke-RestMethod "$api/api/tags" -TimeoutSec 3 | Out-Null
+            $ready = $true
+          } catch {}
+          if (-not $ready) {
+            Start-Process -FilePath $ollama -ArgumentList "serve" -WindowStyle Hidden
+            for ($i=0; $i -lt 60; $i++) {
+              try {
+                Invoke-RestMethod "$api/api/tags" -TimeoutSec 3 | Out-Null
+                $ready = $true
+                break
+              } catch { Start-Sleep -Seconds 2 }
+            }
+          }
+          if (-not $ready) { throw "Ollama API unavailable" }
+
+          $models = @("qwen2.5-coder:1.5b","qwen2.5-coder:3b")
+          $logical = [Environment]::ProcessorCount
+          $threads = @(0,1,2,4) | Where-Object { $_ -eq 0 -or $_ -le $logical }
+          $prompt = "Write only Python code defining def clamp(value, low, high) that returns value clamped between low and high. Include one usage example."
+          $results = @()
+
+          foreach ($model in $models) {
+            Write-Host "Downloading model: $model"
+            & $ollama pull $model
+            if ($LASTEXITCODE -ne 0) { throw "Download failed: $model" }
+            foreach ($count in $threads) {
+              $options = @{ num_ctx=2048; num_predict=150; temperature=0; num_gpu=0 }
+              if ($count -gt 0) { $options.num_thread = $count }
+              $values = @()
+              for ($attempt = 0; $attempt -lt 3; $attempt++) {
+                $body = @{ model=$model; prompt=$prompt; stream=$false; think=$false; keep_alive="5m"; options=$options } | ConvertTo-Json -Depth 6
+                $timer = [System.Diagnostics.Stopwatch]::StartNew()
+                $r = Invoke-RestMethod -Uri "$api/api/generate" -Method Post -ContentType "application/json" -Body $body -TimeoutSec 180
+                $timer.Stop()
+                if ($attempt -gt 0) {
+                  if ($r.eval_count -le 0 -or $r.eval_duration -le 0) { throw "No timing counters for $model" }
+                  $speed = [math]::Round($r.eval_count / ($r.eval_duration / 1e9),2)
+                  $values += [pscustomobject]@{speed=$speed;elapsed=[math]::Round($timer.Elapsed.TotalSeconds,2)}
+                }
+              }
+              $avgSpeed = [math]::Round(($values | Measure-Object speed -Average).Average,2)
+              $avgSeconds = [math]::Round(($values | Measure-Object elapsed -Average).Average,2)
+              $results += [pscustomobject]@{ Model=$model; Threads=$(if ($count -eq 0) {"auto"} else {"$count"}); TokensPerSecond=$avgSpeed; ResponseSeconds=$avgSeconds }
+              Write-Host "$model (threads=$count): $avgSpeed tokens/sec, $avgSeconds seconds"
+            }
+          }
+
+          $lines = @(
+            "# Public-runner coding model benchmark",
+            "",
+            "Runner OS: Windows; logical CPU count: $logical",
+            "",
+            "| Model | Threads | Tokens/sec | Response seconds |",
+            "|---|---:|---:|---:|"
+          )
+          foreach ($entry in $results) {
+            $lines += "| $($entry.Model) | $($entry.Threads) | $($entry.TokensPerSecond) | $($entry.ResponseSeconds) |"
+          }
+          $lines += ""
+          $lines += "Speeds measured on this runner with short coding prompts, 2048-token context and no GPU. Not guaranteed real-world speed."
+          $lines -join [Environment]::NewLine | Set-Content -Path "public-cpu-results.md" -Encoding UTF8
+          $lines -join [Environment]::NewLine | Out-File -Append -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8
+
+      - name: Downloadable benchmark report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: public-runner-cpu-results
+          path: public-cpu-results.md
+          if-no-files-found: warn
