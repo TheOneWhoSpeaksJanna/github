@@ -1,0 +1,57 @@
+{
+  "date": "2026-10-10T17:35:25.574021+00:00",
+  "logical_processors": 2,
+  "best_1_5b": null,
+  "best_3b": null,
+  "promote_3b": false,
+  "rows": [
+    {
+      "model": "qwen2.5-coder:1.5b",
+      "threads": null,
+      "tps": 0,
+      "seconds": 0,
+      "syntax": 0,
+      "status": "FAILED Ollama exited: 1"
+    },
+    {
+      "model": "qwen2.5-coder:3b",
+      "threads": null,
+      "tps": 0,
+      "seconds": 0,
+      "syntax": 0,
+      "status": "FAILED Ollama exited: 1"
+    },
+    {
+      "model": "qwen2.5-coder:1.5b",
+      "threads": 1,
+      "tps": 0,
+      "seconds": 0,
+      "syntax": 0,
+      "status": "FAILED Ollama exited: 1"
+    },
+    {
+      "model": "qwen2.5-coder:3b",
+      "threads": 1,
+      "tps": 0,
+      "seconds": 0,
+      "syntax": 0,
+      "status": "FAILED Ollama exited: 1"
+    },
+    {
+      "model": "qwen2.5-coder:1.5b",
+      "threads": 2,
+      "tps": 0,
+      "seconds": 0,
+      "syntax": 0,
+      "status": "FAILED Ollama exited: 1"
+    },
+    {
+      "model": "qwen2.5-coder:3b",
+      "threads": 2,
+      "tps": 0,
+      "seconds": 0,
+      "syntax": 0,
+      "status": "FAILED Ollama exited: 1"
+    }
+  ]
+}
