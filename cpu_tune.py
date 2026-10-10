@@ -13,7 +13,7 @@ import urllib.request
 
 API = 'http://127.0.0.1:11434'
 OLLAMA = r'C:\Ollama\ollama.exe'
-MODELS = ('qwen2.5-coder:1.5b', 'qwen2.5-coder:3b')
+MODELS = ('qwen2.5-coder:1.5b', 'qwen2.5-coder:3b', 'qwen2.5-coder:3b-instruct-q3_K_M', 'qwen2.5-coder:3b-instruct-q2_K')
 PROMPTS = [
     ('clamp', 'Write only valid Python code defining clamp(value, low, high), which clips value between low and high. No markdown.'),
     ('fibonacci', 'Write only valid Python code defining fibonacci(n), returning the nth Fibonacci number (0,1,1,2,3...). No markdown.'),
@@ -91,7 +91,7 @@ def generate(model, prompt, threads=None, limit=160):
 
 def main():
     logical = os.cpu_count() or 2
-    threads_list = [None] + [n for n in (1,2,3,4,6,8) if n <= logical]
+    threads_list = [1]  # previous successful benchmark showed 1 thread was fastest
     rows = []
     print("Logical CPU threads available:", logical, flush=True)
     server = start_server()
@@ -124,7 +124,10 @@ def main():
     def best(model):
         valid = [r for r in rows if r["model"] == model and r["status"] == "OK" and r["syntax"] >= 1]
         return max(valid, key=lambda r: (r["syntax"],r["tps"])) if valid else None
-    a,b = best(MODELS[0]),best(MODELS[1])
+    a = best(MODELS[0])
+    candidates = [best(model) for model in MODELS[1:]]
+    candidates = [row for row in candidates if row]
+    b = max(candidates,key=lambda row:(row['syntax'],row['tps'])) if candidates else None
     promote = bool(a and b and b["tps"]>=12 and
                    b["tps"]>=0.70*a["tps"] and b["syntax"]>=a["syntax"])
     report = [
@@ -142,7 +145,7 @@ def main():
     report += [
       "", "## Decision",
       f"Best 1.5B: {a['tps']} t/s, threads={a['threads']}" if a else "1.5B failed",
-      f"Best 3B: {b['tps']} t/s, threads={b['threads']}" if b else "3B failed",
+      f"Best 3B: {b['model']} at {b['tps']} t/s, threads={b['threads']}" if b else "All 3B variants failed",
       "**Promote 3B: "+("YES" if promote else "NO")+"**",
       "Requirements: 3B >=12 tokens/s, >=70% of tuned 1.5B, equal or better syntax results.",
       "Two-vCPU GitHub runners are not expected to achieve ChatGPT-class inference speed."]
@@ -153,7 +156,7 @@ def main():
       "logical_processors":logical,"best_1_5b":a,"best_3b":b,
       "promote_3b":promote,"rows":rows},indent=2)+"\n",encoding="utf8")
     if promote:
-        Path("selected-model.txt").write_text("qwen2.5-coder:3b\n",encoding="utf8")
+        Path("selected-model.txt").write_text(b["model"]+"\n",encoding="utf8")
     if not a or not b:
         raise RuntimeError("Benchmark incomplete: neither model size had a qualifying sample; see CPU_TUNING.md")
     print("AUTO PROMOTION:",promote,flush=True)
