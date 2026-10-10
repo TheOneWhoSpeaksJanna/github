@@ -8,6 +8,7 @@ jobs:
     runs-on: windows-2022
     timeout-minutes: 350
     steps:
+      - uses: actions/checkout@v4
       - name: Install and authenticate Tailscale
         shell: powershell
         env:
@@ -73,8 +74,27 @@ jobs:
             } catch { Start-Sleep -Seconds 2 }
           }
           if (-not $ready) { throw "Ollama server did not start" }
-          & $ollama pull qwen3:4b
-          if ($LASTEXITCODE -ne 0) { throw "Model pull failed" }
+          # Read model chosen by latest benchmark; edit selected-model.txt to override it.
+          $model = "qwen2.5-coder:1.5b"
+          if (Test-Path "selected-model.txt") {
+            $value = (Get-Content "selected-model.txt" -Raw).Trim()
+            if ($value -match '^[a-zA-Z0-9_.:/-]+
+          Write-Host "========================================"
+          Write-Host "ANDROID APP SERVER URL: $api"
+          Write-Host "MODEL: $model"
+          Write-Host "Ollama executable: C:\Ollama\ollama.exe"
+          Write-Host "========================================"
+          while ($true) {
+            Start-Sleep -Seconds 300
+            if (-not (Get-Process ollama -ErrorAction SilentlyContinue)) { throw "Ollama stopped" }
+            Write-Host "Ollama API running"
+          }
+) { $model = $value }
+            else { throw "Invalid selected-model.txt value" }
+          }
+          & $ollama pull $model
+          if ($LASTEXITCODE -ne 0) { throw "Model pull failed: $model" }
+          Write-Host "Active model: $model"
           Write-Host "========================================"
           Write-Host "ANDROID APP SERVER URL: $api"
           Write-Host "MODEL: qwen3:4b"
