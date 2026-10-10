@@ -1,57 +1,71 @@
 {
-  "date": "2026-10-10T17:35:25.574021+00:00",
+  "date": "2026-10-10T17:44:52.268638+00:00",
   "logical_processors": 2,
-  "best_1_5b": null,
-  "best_3b": null,
+  "best_1_5b": {
+    "model": "qwen2.5-coder:1.5b",
+    "threads": 1,
+    "status": "OK",
+    "tps": 24.84,
+    "seconds": 2.55,
+    "syntax": 2
+  },
+  "best_3b": {
+    "model": "qwen2.5-coder:3b",
+    "threads": 1,
+    "status": "OK",
+    "tps": 12.29,
+    "seconds": 5.18,
+    "syntax": 2
+  },
   "promote_3b": false,
   "rows": [
     {
       "model": "qwen2.5-coder:1.5b",
       "threads": null,
-      "tps": 0,
-      "seconds": 0,
-      "syntax": 0,
-      "status": "FAILED Ollama exited: 1"
+      "status": "OK",
+      "tps": 21.55,
+      "seconds": 2.86,
+      "syntax": 2
     },
     {
       "model": "qwen2.5-coder:3b",
       "threads": null,
-      "tps": 0,
-      "seconds": 0,
-      "syntax": 0,
-      "status": "FAILED Ollama exited: 1"
+      "status": "OK",
+      "tps": 11.59,
+      "seconds": 5.35,
+      "syntax": 2
     },
     {
       "model": "qwen2.5-coder:1.5b",
       "threads": 1,
-      "tps": 0,
-      "seconds": 0,
-      "syntax": 0,
-      "status": "FAILED Ollama exited: 1"
+      "status": "OK",
+      "tps": 24.84,
+      "seconds": 2.55,
+      "syntax": 2
     },
     {
       "model": "qwen2.5-coder:3b",
       "threads": 1,
-      "tps": 0,
-      "seconds": 0,
-      "syntax": 0,
-      "status": "FAILED Ollama exited: 1"
+      "status": "OK",
+      "tps": 12.29,
+      "seconds": 5.18,
+      "syntax": 2
     },
     {
       "model": "qwen2.5-coder:1.5b",
       "threads": 2,
-      "tps": 0,
-      "seconds": 0,
-      "syntax": 0,
-      "status": "FAILED Ollama exited: 1"
+      "status": "OK",
+      "tps": 22.79,
+      "seconds": 2.73,
+      "syntax": 2
     },
     {
       "model": "qwen2.5-coder:3b",
       "threads": 2,
-      "tps": 0,
-      "seconds": 0,
-      "syntax": 0,
-      "status": "FAILED Ollama exited: 1"
+      "status": "OK",
+      "tps": 11.65,
+      "seconds": 5.33,
+      "syntax": 2
     }
   ]
 }

@@ -1,25 +1,24 @@
 # CPU tuning benchmark
 
-Completed UTC: 2026-10-10T17:35:25.574021+00:00
+Completed UTC: 2026-10-10T17:44:52.268638+00:00
 Visible logical processors: **2**
 
-Compared two standard coding models with identical short prompts and 2048-token context.
-Syntax checking verifies named function definitions parse, **not that the generated code works**.
-Thread control via LLAMA_ARG_THREADS is version-dependent and may be ignored.
+Single Ollama server with per-request options.num_thread settings.
+Two code syntax checks only; generated code was not executed.
+Model generation tokens/sec and average full-response seconds measured.
 
-| Model | Threads | Tokens/sec | Average seconds | Syntax checks | Status |
+| Model | CPU threads | Tokens/sec | Average seconds | Syntax checks | Status |
 |---|---:|---:|---:|---:|---|
-| qwen2.5-coder:1.5b | default | 0 | 0 | 0/2 | FAILED Ollama exited: 1 |
-| qwen2.5-coder:3b | default | 0 | 0 | 0/2 | FAILED Ollama exited: 1 |
-| qwen2.5-coder:1.5b | 1 | 0 | 0 | 0/2 | FAILED Ollama exited: 1 |
-| qwen2.5-coder:3b | 1 | 0 | 0 | 0/2 | FAILED Ollama exited: 1 |
-| qwen2.5-coder:1.5b | 2 | 0 | 0 | 0/2 | FAILED Ollama exited: 1 |
-| qwen2.5-coder:3b | 2 | 0 | 0 | 0/2 | FAILED Ollama exited: 1 |
+| qwen2.5-coder:1.5b | auto | 21.55 | 2.86 | 2/2 | OK |
+| qwen2.5-coder:3b | auto | 11.59 | 5.35 | 2/2 | OK |
+| qwen2.5-coder:1.5b | 1 | 24.84 | 2.55 | 2/2 | OK |
+| qwen2.5-coder:3b | 1 | 12.29 | 5.18 | 2/2 | OK |
+| qwen2.5-coder:1.5b | 2 | 22.79 | 2.73 | 2/2 | OK |
+| qwen2.5-coder:3b | 2 | 11.65 | 5.33 | 2/2 | OK |
 
 ## Decision
-1.5B failed
-3B failed
-**Promote to 3B: NO**
-
-Rule: 3B must exceed 12 t/s (versus previous 9.10), reach at least 70% of optimized 1.5B throughput, and match or exceed the syntax score.
-No claim of ChatGPT-equivalent speed. Benchmarks on different GitHub-hosted VMs may vary.
+Best 1.5B: 24.84 t/s, threads=1
+Best 3B: 12.29 t/s, threads=1
+**Promote 3B: NO**
+Requirements: 3B >=12 tokens/s, >=70% of tuned 1.5B, equal or better syntax results.
+Two-vCPU GitHub runners are not expected to achieve ChatGPT-class inference speed.
