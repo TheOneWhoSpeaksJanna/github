@@ -87,9 +87,42 @@ jobs:
           }
           & $ollama pull $model
           if ($LASTEXITCODE -ne 0) { throw "Model pull failed: $model" }
+
+          # Create a clearly identified, concise chat profile.
+          # A prompt cannot give the model web browsing or upload capabilities.
+          $profile = Join-Path $env:TEMP "Modelfile"
+          @"
+          FROM $model
+          PARAMETER num_ctx 2048
+          PARAMETER num_predict 256
+          PARAMETER temperature 0.2
+          SYSTEM """
+          You are a local coding assistant powered by the Ollama model $model, not ChatGPT or an OpenAI model.
+          When asked your identity, name the actual underlying model accurately.
+          Be concise unless the user requests a detailed explanation.
+          Do not claim to have searched websites, uploaded images, used a terminal, or executed tools unless the connected app actually performed those actions.
+          If the request requires unavailable tools, say which capability is missing.
+          """
+          "@ | Set-Content -Path $profile -Encoding UTF8
+          & $ollama create local-coder -f $profile
+          if ($LASTEXITCODE -ne 0) { throw "Could not create chat profile" }
+          
+          # Tiny warm-up, keeping the model in memory for a quicker first message.
+          $request = @{
+            model = "local-coder"
+            prompt = "Reply with OK."
+            stream = $false
+            keep_alive = "30m"
+            options = @{ num_predict = 8; num_ctx = 2048 }
+          } | ConvertTo-Json -Depth 5
+          try {
+            $warmup = Invoke-RestMethod -Uri "$api/api/generate" -Method Post -ContentType "application/json" -Body $request -TimeoutSec 120
+            Write-Host "Warm-up generation: $([math]::Round($warmup.eval_count / [math]::Max($warmup.eval_duration / 1e9,0.001),1)) tokens/sec"
+          } catch { Write-Host "Warm-up failed: $($_.Exception.Message)" }
+          
           Write-Host "========================================"
           Write-Host "ANDROID APP SERVER URL: $api"
-          Write-Host "MODEL: $model"
+          Write-Host "MODEL: local-coder (based on $model)"
           Write-Host "Ollama executable: C:\Ollama\ollama.exe"
           Write-Host "========================================"
           while ($true) {
