@@ -1,50 +1,105 @@
-# AI CPU runner setup
+# Pocket File Agent: local model that makes downloadable files
 
-This GitHub repository is public. Workflow source, commit history, job logs, reports, and build artifacts may be visible to anyone.
+This repository now runs a **file-creating local AI agent**, not an Ollama
+chat server or Hermes dashboard. It is meant for use from **Android through
+Tailscale** and runs on a temporary Windows Server 2022 GitHub Actions VM.
 
-## Current setup
-- Host: standard GitHub-hosted Windows Server 2022 Actions runner. Public repositories ordinarily have 4 logical CPUs and 16 GB RAM; verify in each job's hardware step.
-- Runtime: Ollama, CPU-only. This is an ephemeral environment: each run has a 350-minute time limit. It cannot host a truly permanent 24/7 service.
-- Android access: through Tailscale only, not a public Ollama endpoint.
-- Original Android Ollama model: edit [selected-model.txt](selected-model.txt). Hermes Agent models: edit [hermes-models.txt](hermes-models.txt) (the first uncommented line is the default; additional lines are also downloaded, up to four). Changes take effect on the next manual run. Never put credentials in tracked files.
-- API: http://<this-run-Tailscale-IP>:11434 (available only inside the Tailnet). Ollama model alias: local-coder.
+## Get started
 
-## Start Android AI
-1. Ensure the repository Actions secret TAILSCALE_AUTHKEY exists. Never paste the key into workflow source or issues.
-2. Open Actions > Android Ollama over Tailscale > Run workflow.
-3. Wait until Install and authenticate Tailscale and Install Ollama in shared directory finish successfully. The server is available only after Ollama installation and model load.
-4. Open the Tailscale app on Android with an account authorized for the same tailnet.
-5. In the Tailscale admin/devices dashboard, locate the device named ollama-<GitHub-run-ID> and its 100.x.x.x address. The address is masked in public Actions logs.
-6. Use http://<100.x.x.x>:11434 as the Ollama base URL in your Android app. Choose local-coder once the workflow loads the model.
+1. On Android, open **[Pocket Local File Agent — Actions](https://github.com/TheOneWhoSpeaksJanna/github/actions/workflows/file-agent.yml)**.
+2. Select **Run workflow**, leave **operation=start**, and choose the session
+   length (default 300 minutes).
+3. Wait for the run log message **FILE AGENT STARTED**.
+4. Open Tailscale on Android. Find **file-agent-<run ID>** and copy its private
+   **100.x.x.x** address.
+5. In Android Chrome, visit **http://100.x.x.x:9120** (with that real address).
+6. Sign in as **owner** with the existing GitHub Actions repository secret
+   **HERMES_DASHBOARD_PASSWORD**. That password is reused for the new agent
+   and for encrypted file backups.
 
-## Optional Hermes Agent (experimental)
+Describe a task, such as **“Create a Python calculator and a README”**.
+The agent uses a local model to produce real text/source files. Tap a file to
+download it to Android, or use **Download ZIP** for all workspace files.
+Select an existing file in the dashboard when asking the agent to revise it.
 
-Hermes is a separate tool-using agent, not merely another Ollama model alias. Your original Ollama Android chat server stays available as-is. Its default model is selected from [hermes-models.txt](hermes-models.txt), separate from your original chat setup. The model is chosen by the first uncommented line of `hermes-models.txt`. Hermes requires a 65,536-token Ollama request context for tool use; small or 32K-native models may become slow or unreliable at that setting. See [Hermes Agent Setup](HERMES_AGENT_SETUP.md) for the optional workflow, password-protected browser dashboard and Tailscale connection details.
+**[Full Android setup, downloads, encrypted backups and troubleshooting](FILE_AGENT_SETUP.md)**
 
-The optional Hermes workflow caches **only clean, publicly available program files and standard model weights**, before any secrets or conversations are loaded. On a cache hit it can skip the slow Windows, Ollama and Hermes installation. The first run, or one after GitHub evicts the cache, still needs a full setup.
+## New agent vs. the retired chat systems
 
-Hermes keeps its dashboard alive in **one long-running job step** and now **encrypts and uploads off-VM recovery checkpoints on GitHub every 10 minutes**, as well as at startup and graceful shutdown. The last eight rolling encrypted snapshots are kept in a dedicated GitHub prerelease; a completed run also uploads a separate encrypted Actions artifact (up to 90-day retention). The next Hermes run automatically restores the latest rolling checkpoint. **To shut down safely**, open [Hermes Agent workflow](.github/workflows/hermes-agent.yml), select **Run workflow**, change the **operation** dropdown from **start** to **stop**, and submit. The running job sees this request, uploads its final checkpoint and exits normally. Avoid the Cancel button, which can lose data since the last successful remote checkpoint. The public repo exposes only AES-256-GCM encrypted state; keep the dashboard password to decrypt it. See [Hermes Agent Setup](HERMES_AGENT_SETUP.md) for exact instructions and excluded file types.
+- The **old Ollama Chat workflow is removed**. Ollama remains installed
+  internally as the local text-generation engine, but its port 11434 is
+  **restricted to 127.0.0.1 on the VM**, not exposed to Android.
+- The **Hermes workflow is retired**, because its large system/tool prompt
+  caused 90–240-second timeouts on the four-CPU Windows runner.
+- The new file agent requests a much smaller structured JSON response,
+  validates paths and writes only allowed UTF-8 text/source files in its own
+  workspace. It provides individual and ZIP downloads over the private
+  password-protected Android dashboard.
+- The tested local model is **standard qwen2.5-coder:1.5b**, configured in
+  [agent-models.txt](agent-models.txt). The archived Hermes model setting is
+  not used by the new agent.
+- This is a **bounded file-task agent**, not a full remote computer or an
+  unrestricted terminal. It does not run arbitrary model-generated commands,
+  send emails, browse the open internet or edit files outside the workspace.
 
-## Hermes slow chat and Windows PC diagnostics
+## Actions workflows
 
-Hermes's large default tool prompt is slow on a four-CPU runner even when direct Ollama chat is fast. The agent workflow now offers **agent_mode: chat (default), light (file tools), or full (all tools)**. Measured simple-message times were about **17 seconds**, **30-58 seconds**, and **over 90 seconds (timeout)** respectively. Chat mode has no agent tools; select light/full for actions. Your chosen model and original Android Ollama workflow are unchanged.
+Only two active YAML workflows remain:
 
-Use **Actions > Hermes performance and PC diagnostics > Run workflow** to benchmark CPU/RAM, Ollama 2K/65K inference, and Hermes tool profiles without any dashboard secrets or private chats. Completed real Hermes sessions also upload a privacy-safe PC health report. See [Hermes performance guide](HERMES_PERFORMANCE.md).
+| Workflow | What it does |
+| --- | --- |
+| [Pocket Local File Agent](.github/workflows/file-agent.yml) | Start/stop a private Windows VM with an agent dashboard, model, downloadable workspace and 10-minute encrypted backups |
+| [Pocket File Agent tests and CPU speed](.github/workflows/agent-verify.yml) | Manually verify sandbox security, actual model file creation, ZIP output and CPU hardware without accessing private secrets |
 
-## Clean Actions setup
-Three permanent workflows remain in the current repository:
+Both are **manual-only**; commits do not start long-running model servers.
 
-- [Android Ollama over Tailscale](.github/workflows/main.yml): manually start the existing Ollama server for the Android app; the temporary server stays active while its Actions job runs.
-- [Hermes Agent over Tailscale](.github/workflows/hermes-agent.yml): manually start a separate agent dashboard with a password and encrypted state snapshots.
-- [Hermes performance and PC diagnostics](.github/workflows/hermes-diagnostics.yml): manually benchmark local CPU speed and observe public-safe metrics without private secrets.
+## Speed and testing
 
-Old CPU/Hermes testing workflows were removed to simplify the Actions list. Their past completed run records remain in GitHub history; removing workflow YAML files does not erase past run logs or artifacts. Historical CPU benchmarks are documented in MODEL_BENCHMARK.md, CPU_TUNING.md and SELECTED_MODEL_SPEED.md.
+Tests on the actual GitHub Windows runner completed successfully:
 
-## Security after switching visibility
-- Important: Old commit history may contain a hard-coded RDP password. Treat that password as compromised; change or revoke it everywhere it may still work. Deleting it in a new commit does not erase Git history.
-- Review old Actions job logs, artifacts, and commit history before sharing other sensitive information.
-- Rotate Tailscale authentication keys or other credentials if they were exposed. Store secrets only using GitHub Actions Secrets and revoke unused Tailscale nodes.
-- Do not expose port 11434 to the public internet. Maintain appropriate Tailscale access controls.
-- Do not allow untrusted pull-request code to run in workflows with secrets.
+- [Real Ollama structured output → file → ZIP](https://github.com/TheOneWhoSpeaksJanna/github/actions/runs/38158954754):
+  **6.92 seconds** for a short Markdown task after startup.
+- [Full password-protected HTTP dashboard → task → Android-style download](https://github.com/TheOneWhoSpeaksJanna/github/actions/runs/38159306487):
+  **6.05 seconds**, including real local-model generation and ZIP download.
+- Security tests include password requirements, same-origin checks,
+  blocked filesystem traversal, Windows path normalization and file size
+  limits.
 
-More RAM and CPU do not guarantee any specific tokens-per-second rate. Benchmarking does not change the model selection.
+Times vary by prompt length and output file size. The tests used a
+loopback-only Windows VM with no private secrets; they do not by themselves
+verify a future Tailscale connection or every possible file-generation task.
+
+## Save work and shut down safely
+
+To stop, select **Run workflow > operation=stop**. The live agent receives
+the control signal and saves a final encrypted backup before GitHub tears
+down its temporary VM. Workspace checkpoints are AES-256-GCM encrypted and
+uploaded to a dedicated release **at startup, every 10 minutes and at normal
+shutdown**. The last eight rolling checkpoints are retained, and a separate
+Actions backup artifact is uploaded after a normal run.
+
+The old Hermes encrypted backup release is **kept separately**, so
+switching agents doesn't delete old saved history. The original model
+configuration files and legacy performance documentation also remain for
+reference; those retired services do not run.
+
+## Security and privacy
+
+This repository is **public**. Repo files, commit history, Actions logs and
+unencrypted artifacts are potentially public. New agent outputs live inside
+the ephemeral runner and the private Tailscale dashboard; **only encrypted
+workspace backups** are uploaded to GitHub. Keep the decryption password
+private and download important outputs to your own storage.
+
+Do not expose the web dashboard or internal Ollama port directly on the
+internet. Maintain Tailscale access restrictions. Historic repository
+revisions may contain exposed credentials; rotate any credentials that were
+ever committed or logged. Never run untrusted pull-request code with Actions
+secrets.
+
+GitHub-hosted Windows VMs are temporary, not an always-on personal server.
+Session length is limited, and Actions minutes/cache/storage quotas apply.
+
+Documentation: [File Agent guide](FILE_AGENT_SETUP.md) |
+[Archived Hermes performance findings](HERMES_PERFORMANCE.md) |
+[Historical CPU tuning](CPU_TUNING.md).
