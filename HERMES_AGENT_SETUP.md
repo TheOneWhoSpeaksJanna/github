@@ -19,6 +19,14 @@ Hermes supplies real tool orchestration, such as inspecting files, working on co
 
 The agent uses an **unmodified standard Qwen3.5 2B** model with **65,536-token context**. Large prompts and tool schemas can make response time much slower than the earlier 30-tokens/second chat experience. Hermes's local model requirements and context size are more demanding than Ollama chat.
 
+## Faster startup and secure software caching
+
+The Hermes workflow now keeps a reusable GitHub Actions cache containing **only the official installed Hermes application, Ollama program files, and the standard Qwen3.5 2B model**. On a cache hit, it skips the slow Hermes installation, frontend build, and large model download. It still installs Tailscale, checks encryption, and restores your separately **encrypted** sessions and memory each run. **No passwords, Tailnet credentials, user profile files or plaintext conversations go into the public cache**.
+
+The **first run with the new cache** must perform the full installation once and save its cache. Later runs should be much faster on a cache hit. The startup logs explicitly report cache hit/miss. Cache retention and eviction are controlled by GitHub; after cache eviction the slower install may be required again. Actual speed depends on GitHub's runners and download performance.
+
+The job now uses the dashboard's authenticated status API for health checks instead of tracking the lifetime of a temporary Windows launcher process.
+
 ## Running time, limitations and security
 
 - GitHub-hosted runners are temporary. The workflow automatically creates an **AES-256-GCM encrypted snapshot approximately every 45 minutes**, then finishes after seven segments (about 5 hours 15 minutes of dashboard access, plus startup time). Each new run automatically restores the newest prior encrypted snapshot, including SQLite chat sessions, Hermes memory, skills, configuration and files in its agent workspace. The Ollama model and Hermes application are reinstalled; they are not included in the backup.
