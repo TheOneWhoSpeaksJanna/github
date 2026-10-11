@@ -4,6 +4,7 @@ on:
   push:
     paths:
       - .github/workflows/hermes-agent.yml
+      - scripts/hermes-server.ps1
 permissions:
   contents: read
   actions: read
