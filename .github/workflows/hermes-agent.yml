@@ -51,7 +51,7 @@ jobs:
       - name: Verify PowerShell scripts
         shell: powershell
         run: |
-          $files = @("scripts\hermes-bootstrap.ps1", "scripts\hermes-fast-server.ps1", "scripts\hermes-checkpoint.ps1")
+          $files = @("scripts\hermes-bootstrap.ps1", "scripts\hermes-fast-server.ps1", "scripts\hermes-checkpoint.ps1", "scripts\hermes-health.ps1")
           foreach ($file in $files) {
             $data = [IO.File]::ReadAllBytes((Resolve-Path $file).Path)
             if (@($data | Where-Object { $_ -gt 127 }).Count -gt 0) {
@@ -211,6 +211,16 @@ jobs:
         run: |
           & .\scripts\hermes-fast-server.ps1
           if (-not $?) { throw "Hermes dashboard ended with an error" }
+
+      - name: Upload privacy-safe CPU and memory diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hermes-pc-health-${{ github.run_id }}
+          path: ${{ runner.temp }}/hermes-health.jsonl
+          compression-level: 6
+          retention-days: 14
+          if-no-files-found: ignore
 
       - name: Upload encrypted memory checkpoint after session
         if: always()
