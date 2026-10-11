@@ -6,7 +6,7 @@ This GitHub repository is public. Workflow source, commit history, job logs, rep
 - Host: standard GitHub-hosted Windows Server 2022 Actions runner. Public repositories ordinarily have 4 logical CPUs and 16 GB RAM; verify in each job's hardware step.
 - Runtime: Ollama, CPU-only. This is an ephemeral environment: each run has a 350-minute time limit. It cannot host a truly permanent 24/7 service.
 - Android access: through Tailscale only, not a public Ollama endpoint.
-- Model selection: configured in selected-model.txt; never put credentials in tracked files.
+- Original Android Ollama model: edit [selected-model.txt](selected-model.txt). Hermes Agent models: edit [hermes-models.txt](hermes-models.txt) (the first uncommented line is the default; additional lines are also downloaded, up to four). Changes take effect on the next manual run. Never put credentials in tracked files.
 - API: http://<this-run-Tailscale-IP>:11434 (available only inside the Tailnet). Ollama model alias: local-coder.
 
 ## Start Android AI
@@ -19,7 +19,7 @@ This GitHub repository is public. Workflow source, commit history, job logs, rep
 
 ## Optional Hermes Agent (experimental)
 
-Hermes is a separate tool-using agent, not merely another Ollama model alias. Your original Ollama Android chat server stays available as-is. See [Hermes Agent Setup](HERMES_AGENT_SETUP.md) for the optional workflow, password-protected browser dashboard and Tailscale connection details.
+Hermes is a separate tool-using agent, not merely another Ollama model alias. Your original Ollama Android chat server stays available as-is. Its default model is selected from [hermes-models.txt](hermes-models.txt), separate from your original chat setup. The default standard model is `qwen2.5-coder:1.5b`, with 8,192-token context to reduce CPU load. See [Hermes Agent Setup](HERMES_AGENT_SETUP.md) for the optional workflow, password-protected browser dashboard and Tailscale connection details.
 
 The optional Hermes workflow caches **only clean, publicly available program files and standard model weights**, before any secrets or conversations are loaded. On a cache hit it can skip the slow Windows, Ollama and Hermes installation. The first run, or one after GitHub evicts the cache, still needs a full setup.
 
