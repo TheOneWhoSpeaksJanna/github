@@ -1,0 +1,96 @@
+name: Hermes performance and PC diagnostics
+on:
+  workflow_dispatch:
+    inputs:
+      hermes_timeout:
+        description: Maximum seconds for each Hermes test
+        required: true
+        type: choice
+        options:
+          - '90'
+          - '150'
+        default: '90'
+  push:
+    paths:
+      - .github/workflows/hermes-diagnostics.yml
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Show public hardware and resource details
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $cpu = Get-CimInstance Win32_Processor | Select-Object -First 1 Name, NumberOfCores, NumberOfLogicalProcessors
+          $os = Get-CimInstance Win32_OperatingSystem
+          $drive = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='D:'"
+          Write-Host "CPU $($cpu.Name), cores $($cpu.NumberOfCores), logical CPUs $($cpu.NumberOfLogicalProcessors)"
+          Write-Host "Total RAM GB: $([math]::Round($os.TotalVisibleMemorySize / 1048576,2))"
+          Write-Host "Available RAM GB: $([math]::Round($os.FreePhysicalMemory / 1048576,2))"
+          if ($drive) { Write-Host "Drive D free GB: $([math]::Round($drive.FreeSpace / 1GB,2))" }
+          Write-Host "Runner OS: $env:RUNNER_OS / Windows Server 2022"
+
+      - name: Restore clean Hermes, Ollama and currently chosen model
+        id: cache
+        uses: actions/cache/restore@v4
+        with:
+          key: hermes-win2022-pinned79b45d-mobile-v3-${{ hashFiles('hermes-models.txt') }}
+          restore-keys: |
+            hermes-win2022-pinned79b45d-mobile-v3-
+            hermes-windows2022-pinned79b45d-qwen35-2b-mobile-v2
+          path: |
+            ${{ runner.temp }}/hermes
+            ${{ runner.temp }}/ollama-bin
+            ${{ runner.temp }}/ollama-models
+
+      - name: Prepare only public software and model
+        shell: powershell
+        env:
+          HERMES_HOME: ${{ runner.temp }}/hermes
+          OLLAMA_MODELS: ${{ runner.temp }}/ollama-models
+        run: |
+          $ErrorActionPreference = "Stop"
+          & .\scripts\hermes-bootstrap.ps1
+          if (-not $?) { throw "Selected model or Hermes binary missing" }
+
+      - name: Install public psutil diagnostics only
+        shell: powershell
+        run: |
+          python -m pip install --disable-pip-version-check psutil
+          if ($LASTEXITCODE -ne 0) { throw "Unable to install process metrics collector" }
+          python -m py_compile scripts/hermes_diagnostics.py
+          if ($LASTEXITCODE -ne 0) { throw "Benchmark syntax invalid" }
+
+      - name: Benchmark Ollama CPU, large context and Hermes file vs full tools
+        shell: powershell
+        timeout-minutes: 12
+        env:
+          HERMES_HOME: ${{ runner.temp }}/hermes
+          OLLAMA_MODELS: ${{ runner.temp }}/ollama-models
+          HERMES_API_TIMEOUT: "240"
+        run: |
+          $ErrorActionPreference = "Stop"
+          $model = & python scripts/hermes-model-config.py default hermes-models.txt
+          if ($LASTEXITCODE -ne 0 -or -not $model) { throw "No configured Hermes model" }
+          $timeout = 90
+          if ("${{ github.event_name == 'workflow_dispatch' && inputs.hermes_timeout || '90' }}" -match '^[0-9]+$') { $timeout = [int]"${{ github.event_name == 'workflow_dispatch' && inputs.hermes_timeout || '90' }}" }
+          & python scripts/hermes_diagnostics.py --model $model --hermes (Join-Path $env:HERMES_HOME "bin\hermes.exe") --ollama (Join-Path $env:RUNNER_TEMP "ollama-bin\ollama.exe") --out (Join-Path $env:RUNNER_TEMP "HermesDiagnostics") --hermes-timeout $timeout
+          if ($LASTEXITCODE -ne 0) { throw "Hermes diagnostics script failed, inspect saved JSON report" }
+
+      - name: Upload public-safe diagnostic metrics only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hermes-cpu-diagnostics-${{ github.run_id }}
+          path: ${{ runner.temp }}/HermesDiagnostics/benchmark.json
+          retention-days: 14
+          if-no-files-found: warn
