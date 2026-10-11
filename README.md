@@ -25,11 +25,18 @@ The optional Hermes workflow caches **only clean, publicly available program fil
 
 Hermes keeps its dashboard alive in **one long-running job step** and now **encrypts and uploads off-VM recovery checkpoints on GitHub every 10 minutes**, as well as at startup and graceful shutdown. The last eight rolling encrypted snapshots are kept in a dedicated GitHub prerelease; a completed run also uploads a separate encrypted Actions artifact (up to 90-day retention). The next Hermes run automatically restores the latest rolling checkpoint. **To shut down safely**, open [Hermes Agent workflow](.github/workflows/hermes-agent.yml), select **Run workflow**, change the **operation** dropdown from **start** to **stop**, and submit. The running job sees this request, uploads its final checkpoint and exits normally. Avoid the Cancel button, which can lose data since the last successful remote checkpoint. The public repo exposes only AES-256-GCM encrypted state; keep the dashboard password to decrypt it. See [Hermes Agent Setup](HERMES_AGENT_SETUP.md) for exact instructions and excluded file types.
 
+## Hermes slow chat and Windows PC diagnostics
+
+Hermes's large default tool prompt is slow on a four-CPU runner even when direct Ollama chat is fast. The agent workflow now offers **agent_mode: chat (default), light (file tools), or full (all tools)**. Measured simple-message times were about **17 seconds**, **30-58 seconds**, and **over 90 seconds (timeout)** respectively. Chat mode has no agent tools; select light/full for actions. Your chosen model and original Android Ollama workflow are unchanged.
+
+Use **Actions > Hermes performance and PC diagnostics > Run workflow** to benchmark CPU/RAM, Ollama 2K/65K inference, and Hermes tool profiles without any dashboard secrets or private chats. Completed real Hermes sessions also upload a privacy-safe PC health report. See [Hermes performance guide](HERMES_PERFORMANCE.md).
+
 ## Clean Actions setup
-Only two workflows remain in the current repository:
+Three permanent workflows remain in the current repository:
 
 - [Android Ollama over Tailscale](.github/workflows/main.yml): manually start the existing Ollama server for the Android app; the temporary server stays active while its Actions job runs.
 - [Hermes Agent over Tailscale](.github/workflows/hermes-agent.yml): manually start a separate agent dashboard with a password and encrypted state snapshots.
+- [Hermes performance and PC diagnostics](.github/workflows/hermes-diagnostics.yml): manually benchmark local CPU speed and observe public-safe metrics without private secrets.
 
 Old CPU/Hermes testing workflows were removed to simplify the Actions list. Their past completed run records remain in GitHub history; removing workflow YAML files does not erase past run logs or artifacts. Historical CPU benchmarks are documented in MODEL_BENCHMARK.md, CPU_TUNING.md and SELECTED_MODEL_SPEED.md.
 
