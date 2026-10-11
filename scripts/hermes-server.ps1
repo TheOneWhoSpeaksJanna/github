@@ -96,7 +96,7 @@ if (-not $up) {
   if (Test-Path $err) { Get-Content $err -Tail 35 }
   throw "Hermes dashboard did not start with verified authentication"
 }
-Write-Host "HERMES DASHBOARD STARTED — Tailscale port 9119, login required"
+Write-Host "HERMES DASHBOARD STARTED - Tailscale port 9119, login required"
 Write-Host "Open in an Android browser on your authorized Tailnet device."
 Write-Host "Login username: owner. Password: the private repository Actions secret."
 "## Hermes Agent" | Out-File -Append -FilePath $env:GITHUB_STEP_SUMMARY
