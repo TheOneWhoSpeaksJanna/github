@@ -24,6 +24,20 @@ The **only file you need to edit is [hermes-models.txt](hermes-models.txt)** (th
 - A changed list gets a separate reusable cache. Already downloaded models are reused when possible; new models may require extra download time and disk/RAM. The workflow refuses more than four models to avoid unbounded downloads.
 - Hermes Agent requires **at least 64,000 context tokens** for tool use. The Windows server now configures **65,536** for both Ollama and Hermes (`model.ollama_num_ctx`). Choosing a 1.5B model can still be slow or unreliable for tool use. Models advertised with smaller native context windows may degrade when requested to run at 65K.
 
+## Agent speed profiles for this CPU runner
+
+Hermes adds tool definitions and instructions to every message. On this four-CPU Windows runner, direct Ollama answered a short prompt in about 2 seconds, but Hermes with its full default tools timed out repeatedly. A credential-free benchmark measured about **17 seconds in chat-only mode**, **30-58 seconds with file tools**, and **more than 90 seconds in full-tool mode**.
+
+In **Actions > Hermes Agent over Tailscale > Run workflow**, select the **agent_mode** dropdown:
+
+- **chat (default):** ordinary questions; no tool calls or file/browser/terminal actions
+- **light:** four file tools for basic reading and editing, with more latency
+- **full:** all default agent tools; may stall for minutes with a small CPU model
+
+The selected Ollama model remains controlled by [hermes-models.txt](hermes-models.txt). Switching mode requires a new session: use the workflow's graceful **operation=stop** first, then **operation=start** with the new agent_mode. Chat is not equivalent to the full autonomous Hermes agent; choose light/full only when you need tool use.
+
+**PC diagnostics:** [Hermes performance and troubleshooting](HERMES_PERFORMANCE.md) describes a permanent manual workflow that measures CPU, RAM, Ollama tokens/sec, Hermes latency across tool modes and the loaded context. A real Hermes run now logs privacy-safe system health every two minutes and uploads a health JSONL report at session end.
+
 ## Android keyboard support
 
 Hermes's built-in terminal relies on xterm.js, which sometimes ignores mobile keyboard input even when text paste works. The Windows GitHub workflow now builds a small **native Android message composer** into the dashboard Chat tab. After starting a **new** Hermes run with the updated code, you should see **Type a message here...** and **Send** beneath the terminal on your phone. Type in that box and press Send. The message is forwarded via the original authenticated xterm paste/PTY connection, followed by Enter; no public API, second port, or separate password is introduced.
