@@ -24,23 +24,57 @@ irm https://ollama.com/install.ps1 | iex
 $paths = @("$env:LOCALAPPDATA\Programs\Ollama\ollama.exe","$env:ProgramFiles\Ollama\ollama.exe")
 $ollama = $paths | Where-Object { Test-Path $_ } | Select-Object -First 1
 if (-not $ollama) { throw "Ollama executable missing" }
-Get-Process ollama -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-$ollamaProc = Start-Process -FilePath $ollama -ArgumentList "serve" -WindowStyle Hidden -PassThru
-$ready = $false
-for ($i=0; $i -lt 70; $i++) {
-  try {
-    Invoke-RestMethod "http://127.0.0.1:11434/api/tags" -TimeoutSec 2 | Out-Null
-    $ready = $true
-    break
-  } catch { Start-Sleep -Seconds 2 }
+# The Windows installer can briefly start/stop its own background Ollama app.
+# Allow it to finish before starting a managed CPU-only API server.
+Start-Sleep -Seconds 10
+function Restart-OllamaServer {
+  param([int]$Attempt)
+  Get-Process -Name "ollama" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+  Start-Sleep -Seconds 3
+  $stdout = Join-Path $env:RUNNER_TEMP "ollama-server-$Attempt.stdout.log"
+  $stderr = Join-Path $env:RUNNER_TEMP "ollama-server-$Attempt.stderr.log"
+  $proc = Start-Process -FilePath $ollama -ArgumentList "serve" -WindowStyle Hidden -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+  for ($i=0; $i -lt 35; $i++) {
+    if ($proc.HasExited) {
+      Write-Warning "Ollama process exited during startup (attempt $Attempt)."
+      break
+    }
+    try {
+      Invoke-RestMethod "http://127.0.0.1:11434/api/tags" -TimeoutSec 3 | Out-Null
+      Write-Host "Ollama API ready (attempt $Attempt)."
+      return $true
+    } catch { Start-Sleep -Seconds 2 }
+  }
+  if (Test-Path $stderr) {
+    Write-Host "Ollama diagnostics, last five lines:"
+    Get-Content $stderr -Tail 5 | ForEach-Object { Write-Host $_ }
+  }
+  return $false
 }
-if (-not $ready) { throw "Ollama backend did not become ready" }
 
 # Separate standard tool-capable model, not the user's existing chat configuration.
 $model = "qwen3.5:2b"
-Write-Host "Downloading standard tool-capable model..."
-& $ollama pull $model
-if ($LASTEXITCODE -ne 0) { throw "Model download failed" }
+$downloaded = $false
+for ($attempt = 1; $attempt -le 4; $attempt++) {
+  if (-not (Restart-OllamaServer -Attempt $attempt)) {
+    Write-Warning "Ollama readiness failed on attempt $attempt."
+    continue
+  }
+  Write-Host "Downloading standard tool-capable model (attempt $attempt)..."
+  & $ollama pull $model
+  if ($LASTEXITCODE -eq 0) {
+    try {
+      Invoke-RestMethod "http://127.0.0.1:11434/api/tags" -TimeoutSec 4 | Out-Null
+      $downloaded = $true
+      break
+    } catch { Write-Warning "Ollama disconnected just after model download; retrying." }
+  } else {
+    Write-Warning "Ollama download or connection failed on attempt $attempt; restarting its API before retry."
+  }
+  Start-Sleep -Seconds (3 * $attempt)
+}
+if (-not $downloaded) { throw "Model pull failed repeatedly after Ollama service restarts" }
+Write-Host "Standard local agent model download verified."
 
 Write-Host "Installing official Hermes Agent..."
 $installer = Invoke-RestMethod "https://hermes-agent.nousresearch.com/install.ps1"
