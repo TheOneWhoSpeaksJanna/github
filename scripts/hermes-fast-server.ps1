@@ -81,7 +81,7 @@ foreach ($entry in $config) {
 }
 # Tool schemas dominate prompt prefilling on 4-vCPU runners. Restore memory,
 # but prefer a small explicit tool list unless the user opts into full mode.
-$agentMode = "light"
+$agentMode = "chat"
 if ($env:HERMES_AGENT_MODE) { $agentMode = $env:HERMES_AGENT_MODE.Trim().ToLowerInvariant() }
 & (Join-Path $env:GITHUB_WORKSPACE "scripts\hermes-mode-config.ps1") -HermesExe $hermes -Mode $agentMode
 if (-not $?) { throw "Hermes agent tool mode could not be applied" }
