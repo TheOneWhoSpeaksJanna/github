@@ -106,6 +106,8 @@ if (-not $up) {
 Write-Host "HERMES DASHBOARD STARTED - model $activeModel, Tailscale port 9119, owner password required"
 "## Hermes Agent" | Out-File -Append -FilePath $env:GITHUB_STEP_SUMMARY
 "Private dashboard: find hermes-$env:GITHUB_RUN_ID in Tailscale, use port 9119 and username owner. Never expose this service publicly." | Out-File -Append -FilePath $env:GITHUB_STEP_SUMMARY
+"Encrypted state: remotely checkpointed at startup, every 10 minutes, and after a graceful Stop." | Out-File -Append -FilePath $env:GITHUB_STEP_SUMMARY
+"To stop safely: Actions > Hermes Agent > Run workflow > operation = stop. Do NOT press Cancel on this running job." | Out-File -Append -FilePath $env:GITHUB_STEP_SUMMARY
 
 # An encrypted snapshot saved only on the VM is NOT durable. Upload one at
 # startup, every 10 minutes, and at shutdown to a rolling GitHub prerelease.
@@ -136,7 +138,7 @@ function Stop-Requested {
   try {
     $json = & gh api "repos/$env:GITHUB_REPOSITORY/actions/workflows/hermes-agent.yml/runs?event=workflow_dispatch&per_page=60"
     if ($LASTEXITCODE -ne 0) { throw "Could not poll workflow control requests" }
-    $data = $json | ConvertFrom-Json
+    $data = ($json -join "`n") | ConvertFrom-Json
     $match = @($data.workflow_runs | Where-Object {
       [long]$_.id -gt [long]$env:GITHUB_RUN_ID -and
       $_.display_title -eq "Hermes stop" -and
