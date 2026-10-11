@@ -1,11 +1,6 @@
-name: Verify local file agent and actual output
+name: Pocket File Agent - Test files and CPU speed
 on:
-  push:
-    paths:
-      - .github/workflows/agent-verify.yml
-      - agent/**
-      - scripts/file-agent-bootstrap.ps1
-      - agent-models.txt
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:
@@ -16,6 +11,14 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+
+      - name: Report Windows computer specifications
+        shell: powershell
+        run: |
+          $cpu = Get-CimInstance Win32_Processor | Select-Object -First 1
+          $os = Get-CimInstance Win32_OperatingSystem
+          Write-Host "Hardware: $($cpu.NumberOfLogicalProcessors) logical CPUs, $([math]::Round($os.TotalVisibleMemorySize/1MB,2)) GB total RAM"
+          Write-Host "Free RAM GB: $([math]::Round($os.FreePhysicalMemory/1MB,2))"
 
       - name: Test agent file security and Android download HTTP endpoints
         shell: powershell
