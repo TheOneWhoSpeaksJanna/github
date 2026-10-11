@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Pocket File Agent</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <main class="wrap">
+    <header class="mast">
+      <div>
+        <div class="eyebrow">PRIVATE · LOCAL MODEL · FILE TOOLS</div>
+        <h1>Pocket File Agent</h1>
+        <p class="sub">Give the agent a task. It makes files you can download to your phone.</p>
+      </div>
+      <div class="status" id="health"><span class="dot"></span> Private server</div>
+    </header>
+    <section class="panel task-panel">
+      <h2>What should the agent create?</h2>
+      <label class="visually-hidden" for="goal">File task</label>
+      <textarea id="goal" maxlength="2500" rows="5" placeholder="Create a Python calculator app and a README with instructions. Put them in a calculator/ folder."></textarea>
+      <p class="tip">Creates real files in your private workspace. No shell execution or external sending.</p>
+      <div class="chips">
+        <button type="button" class="chip" data-prompt="Create a simple calculator in Python and a README.md explaining how to use it.">Python project</button>
+        <button type="button" class="chip" data-prompt="Make a weekly study schedule as a Markdown file and a CSV version.">Schedule files</button>
+        <button type="button" class="chip" data-prompt="Create a mobile-friendly website with an HTML file, CSS file, and JavaScript file.">Website files</button>
+      </div>
+      <div class="controls">
+        <button id="run" class="primary" type="button">Create files <span aria-hidden="true">→</span></button>
+        <span id="working" role="status" aria-live="polite">Ready</span>
+      </div>
+      <div id="result" class="result" role="status" aria-live="polite" hidden></div>
+    </section>
+    <section class="panel files-panel">
+      <div class="panel-head">
+        <div>
+          <h2>My files</h2>
+          <p class="tip">Tap a filename to download it. Select existing files when you want the agent to revise them.</p>
+        </div>
+        <div class="panel-actions">
+          <a class="secondary" href="/download-all.zip" id="download-all">Download ZIP</a>
+          <button class="secondary" id="refresh" type="button">Refresh</button>
+        </div>
+      </div>
+      <div id="files" class="file-list" aria-live="polite">
+        <p class="empty">Your generated files appear here.</p>
+      </div>
+    </section>
+    <footer>
+      Runs privately over your Tailscale connection. Generated file actions are limited to this workspace.
+      Keep a local copy of important downloads.
+    </footer>
+  </main>
+</body>
+</html>
