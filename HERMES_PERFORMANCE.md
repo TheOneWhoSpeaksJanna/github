@@ -12,8 +12,9 @@ Hermes was much slower than plain Ollama, despite using the same local model.
 | --- | ---: | --- |
 | Direct Ollama chat, 2,048 context | 1.95 seconds | Success |
 | Direct Ollama chat, 65,536 context | 2.62 seconds | Success |
-| Hermes with only file tools | 29.62 seconds | Success |
+| Hermes with only file tools | 29.62 s and 58.09 s | Success on two trials |
 | Hermes with full default tools | Over 90 seconds | Timeout |
+| Hermes with no tools | 16.97 seconds | Success |
 | Earlier full-tool Hermes test | Over 240 seconds | Timeout |
 
 Hermes includes system instructions, tool schemas, skills and session history
@@ -32,11 +33,8 @@ context can increase memory use and processing time.
 
 Go to Actions > Hermes Agent over Tailscale > Run workflow.
 
-- **light (default):** only the file toolset, with four file operations.
-  Measured around 30 seconds for a very small Hermes question; suitable for
-  basic file work but not guaranteed instant.
-- **chat:** no agent tools at all. Optimized for simple text conversations.
-  Cannot access files or run browser/terminal tools; use light or full for actions.
+- **chat (default):** no agent tools at all; measured **16.97 seconds** for a simple synthetic question. Cannot access files, browser, or terminal tools; switch to light or full if you need actions.
+- **light:** only the file toolset, with four file operations. Measured approximately **30-58 seconds** for a very small Hermes question; suitable for basic file work but not instant.
 - **full:** all standard Hermes CLI tools, with substantial prompt overhead.
   The small CPU-hosted model has timed out repeatedly in this mode.
 
