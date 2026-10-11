@@ -1,8 +1,15 @@
+param(
+  [switch]$PrepareOnly,
+  [switch]$StartOnly
+)
+if ($PrepareOnly -and $StartOnly) { throw "Select one phase" }
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 if (-not $env:TAILSCALE_IP -or $env:TAILSCALE_IP -notmatch '^100\.') { throw "Missing Tailscale address" }
 if (-not $env:HERMES_DASHBOARD_PASSWORD -or $env:HERMES_DASHBOARD_PASSWORD.Length -lt 14) { throw "Create HERMES_DASHBOARD_PASSWORD GitHub secret (14+ characters)" }
 $env:OLLAMA_HOST = "127.0.0.1:11434"
+$env:OLLAMA_MODELS = Join-Path $env:RUNNER_TEMP "hermes-models"
+New-Item -ItemType Directory -Path $env:OLLAMA_MODELS -Force | Out-Null
 $env:OLLAMA_CONTEXT_LENGTH = "65536"
 $env:OLLAMA_NUM_PARALLEL = "1"
 $env:OLLAMA_MAX_LOADED_MODELS = "1"
@@ -14,19 +21,27 @@ $env:HERMES_HOME = Join-Path $env:LOCALAPPDATA "hermes"
 $workdir = Join-Path $env:RUNNER_TEMP "HermesWorkspace"
 New-Item -ItemType Directory -Path $workdir,$env:HERMES_HOME -Force | Out-Null
 
+if (-not $PrepareOnly) {
 $adapter = Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -eq $env:TAILSCALE_IP } | Select-Object -First 1
 if (-not $adapter) { throw "Tailscale adapter missing" }
 New-NetFirewallRule -DisplayName "Hermes Dashboard via Tailscale" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 9119 -InterfaceAlias $adapter.InterfaceAlias -RemoteAddress "100.64.0.0/10" | Out-Null
+}
 
+if (-not $StartOnly) {
 Write-Host "Runner logical processors: $([Environment]::ProcessorCount)"
-Write-Host "Installing Ollama for Hermes..."
-irm https://ollama.com/install.ps1 | iex
+Write-Host "Checking for cached Ollama runtime..."
+$cachedOllama = Join-Path $env:LOCALAPPDATA "Programs\Ollama\ollama.exe"
+if (-not (Test-Path $cachedOllama)) {
+  Write-Host "Cache miss: installing Ollama for Hermes..."
+  irm https://ollama.com/install.ps1 | iex
+  Start-Sleep -Seconds 10
+} else {
+  Write-Host "Cache hit: reusing Ollama runtime."
+}
 $paths = @("$env:LOCALAPPDATA\Programs\Ollama\ollama.exe","$env:ProgramFiles\Ollama\ollama.exe")
 $ollama = $paths | Where-Object { Test-Path $_ } | Select-Object -First 1
 if (-not $ollama) { throw "Ollama executable missing" }
-# The Windows installer can briefly start/stop its own background Ollama app.
-# Allow it to finish before starting a managed CPU-only API server.
-Start-Sleep -Seconds 10
+# The first installation may briefly start its own background Ollama app.
 function Restart-OllamaServer {
   param([int]$Attempt)
   Get-Process -Name "ollama" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
@@ -60,9 +75,17 @@ for ($attempt = 1; $attempt -le 4; $attempt++) {
     Write-Warning "Ollama readiness failed on attempt $attempt."
     continue
   }
-  Write-Host "Downloading standard tool-capable model (attempt $attempt)..."
-  & $ollama pull $model
-  if ($LASTEXITCODE -eq 0) {
+  $existing = & $ollama list
+  $present = @($existing | Where-Object { $_ -match '^qwen3\.5:2b\s' }).Count -gt 0
+  if ($present) {
+    Write-Host "Cache hit: local standard agent model already downloaded."
+    $pullCode = 0
+  } else {
+    Write-Host "Downloading standard tool-capable model (attempt $attempt)..."
+    & $ollama pull $model
+    $pullCode = $LASTEXITCODE
+  }
+  if ($pullCode -eq 0) {
     try {
       Invoke-RestMethod "http://127.0.0.1:11434/api/tags" -TimeoutSec 4 | Out-Null
       $downloaded = $true
@@ -76,11 +99,15 @@ for ($attempt = 1; $attempt -le 4; $attempt++) {
 if (-not $downloaded) { throw "Model pull failed repeatedly after Ollama service restarts" }
 Write-Host "Standard local agent model download verified."
 
-Write-Host "Installing official Hermes Agent..."
-$installer = Invoke-RestMethod "https://hermes-agent.nousresearch.com/install.ps1"
-& ([scriptblock]::Create($installer)) -NonInteractive -HermesHome $env:HERMES_HOME
-if (-not $?) { throw "Hermes installer failed" }
 $hermes = Join-Path $env:HERMES_HOME "bin\hermes.exe"
+if ( (Test-Path $hermes) -and (Test-Path (Join-Path $env:HERMES_HOME "hermes-agent\hermes_cli")) ) {
+  Write-Host "Cache hit: reusing preinstalled Hermes code and Python environment."
+} else {
+  Write-Host "Cache miss: installing official Hermes Agent..."
+  $installer = Invoke-RestMethod "https://hermes-agent.nousresearch.com/install.ps1"
+  & ([scriptblock]::Create($installer)) -NonInteractive -HermesHome $env:HERMES_HOME
+  if (-not $?) { throw "Hermes installer failed" }
+}
 if (-not (Test-Path $hermes)) { throw "Hermes executable missing" }
 & $hermes --version
 if ($LASTEXITCODE -ne 0) { throw "Hermes CLI failed" }
@@ -101,6 +128,41 @@ foreach ($entry in $config) {
   if ($LASTEXITCODE -ne 0) { throw "Hermes config set failed at $($entry[0])" }
 }
 
+Write-Host "Reusable agent dependencies prepared successfully."
+}
+if ($PrepareOnly) {
+  Write-Host "Preparation complete; the workflow can cache only public program and model files."
+  return
+}
+if ($StartOnly) {
+  $hermes = Join-Path $env:HERMES_HOME "bin\hermes.exe"
+  if (-not (Test-Path $hermes)) { throw "Hermes launcher missing after preparation" }
+  $ollama = Join-Path $env:LOCALAPPDATA "Programs\Ollama\ollama.exe"
+  if (-not (Test-Path $ollama)) { throw "Ollama runtime missing after preparation" }
+  $ready = $false
+  for ($i=0; $i -lt 8; $i++) {
+    try {
+      Invoke-RestMethod "http://127.0.0.1:11434/api/tags" -TimeoutSec 3 | Out-Null
+      $ready = $true
+      break
+    } catch { Start-Sleep -Seconds 1 }
+  }
+  if (-not $ready) {
+    Start-Process -FilePath $ollama -ArgumentList "serve" -WindowStyle Hidden | Out-Null
+    for ($i=0; $i -lt 45; $i++) {
+      try {
+        Invoke-RestMethod "http://127.0.0.1:11434/api/tags" -TimeoutSec 3 | Out-Null
+        $ready = $true
+        break
+      } catch { Start-Sleep -Seconds 2 }
+    }
+  }
+  if (-not $ready) { throw "Ollama service unavailable after preparing cache" }
+  $tags = Invoke-RestMethod "http://127.0.0.1:11434/api/tags" -TimeoutSec 5
+  if (-not (@($tags.models | Where-Object { $_.name -like "qwen3.5:2b*" }).Count -gt 0)) {
+    throw "Prepared agent model missing from Ollama runtime"
+  }
+}
 # Remote dashboard never runs without login.
 $env:HERMES_DASHBOARD_BASIC_AUTH_USERNAME = "owner"
 $env:HERMES_DASHBOARD_BASIC_AUTH_PASSWORD = $env:HERMES_DASHBOARD_PASSWORD
