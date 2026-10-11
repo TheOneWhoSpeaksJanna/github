@@ -3,9 +3,10 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+  actions: read
 concurrency:
   group: hermes-agent-server
-  cancel-in-progress: true
+  cancel-in-progress: false
 jobs:
   hermes:
     runs-on: windows-2022
@@ -14,6 +15,54 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+
+      - name: Install snapshot encryption library and self-test
+        shell: powershell
+        run: |
+          python -m pip install --disable-pip-version-check cryptography
+          if ($LASTEXITCODE -ne 0) { throw "Cannot install encrypted snapshot dependency" }
+          python scripts/hermes_persist.py selftest
+          if ($LASTEXITCODE -ne 0) { throw "Encryption self-test failed" }
+
+      - name: Find latest prior encrypted state backup
+        id: backup
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $data = gh api "repos/$env:GITHUB_REPOSITORY/actions/artifacts?per_page=100" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { throw "Cannot list state backups" }
+          $latest = $data.artifacts | Where-Object {
+            $_.name -like "hermes-state-*" -and $_.expired -eq $false -and
+            $_.workflow_run.head_branch -eq "main" -and
+            $_.workflow_run.id -ne [long]$env:GITHUB_RUN_ID
+          } | Sort-Object created_at -Descending | Select-Object -First 1
+          if ($latest) {
+            "name=$($latest.name)" >> $env:GITHUB_OUTPUT
+            "run_id=$($latest.workflow_run.id)" >> $env:GITHUB_OUTPUT
+            Write-Host "Located an encrypted Hermes state snapshot from an earlier run."
+          } else {
+            Write-Host "No earlier Hermes backup exists. Starting with a fresh state."
+          }
+
+      - name: Download the encrypted backup
+        if: steps.backup.outputs.name != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ steps.backup.outputs.name }}
+          run-id: ${{ steps.backup.outputs.run_id }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/hermes-restore
+
+      - name: Restore private sessions, memories and workspace
+        if: steps.backup.outputs.name != ''
+        shell: powershell
+        env:
+          HERMES_DASHBOARD_PASSWORD: ${{ secrets.HERMES_DASHBOARD_PASSWORD }}
+        run: |
+          python scripts/hermes_persist.py restore --home "$env:LOCALAPPDATA\hermes" --workspace "$env:RUNNER_TEMP\HermesWorkspace" --file "$env:RUNNER_TEMP\hermes-restore\hermes-state.enc"
+          if ($LASTEXITCODE -ne 0) { throw "Encrypted restore failed: check the secret, do not start an empty replacement state" }
 
       - name: Authenticate private Tailscale connection
         shell: powershell
@@ -37,8 +86,271 @@ jobs:
           Write-Host "Private Tailscale connection established."
 
       - name: Start password-protected Hermes and Ollama
+        id: server
         shell: powershell
         env:
           HERMES_DASHBOARD_PASSWORD: ${{ secrets.HERMES_DASHBOARD_PASSWORD }}
         run: |
           & .\scripts\hermes-server.ps1
+          if ($LASTEXITCODE -ne 0) { throw "Hermes dashboard failed to start" }
+
+      - name: Keep Hermes available - segment 01 of 7
+        if: success()
+        shell: powershell
+        timeout-minutes: 47
+        run: |
+          $deadline = (Get-Date).AddMinutes(45)
+          while ((Get-Date) -lt $deadline) {
+            Start-Sleep -Seconds 30
+            if (-not (Get-Process -Id ([int]$env:HERMES_DASHBOARD_PID) -ErrorAction SilentlyContinue)) {
+              throw "Hermes process unexpectedly stopped; restore from latest encrypted checkpoint."
+            }
+            if (-not (Get-Process ollama -ErrorAction SilentlyContinue)) {
+              throw "Ollama unexpectedly stopped."
+            }
+          }
+          Write-Host "Finished Hermes segment 01; saving encrypted session checkpoint."
+
+      - name: Encrypt state checkpoint 01
+        if: success()
+        shell: powershell
+        env:
+          HERMES_DASHBOARD_PASSWORD: ${{ secrets.HERMES_DASHBOARD_PASSWORD }}
+        run: |
+          python scripts/hermes_persist.py save --home "$env:LOCALAPPDATA\hermes" --workspace "$env:RUNNER_TEMP\HermesWorkspace" --file "$env:RUNNER_TEMP\hermes-state.enc"
+          if ($LASTEXITCODE -ne 0) { throw "Failed to encrypt Hermes state; no plaintext archive will be uploaded" }
+
+      - name: Save encrypted checkpoint 01 across VM restarts
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hermes-state-${{ github.run_id }}-01
+          path: ${{ runner.temp }}/hermes-state.enc
+          compression-level: 0
+          retention-days: 90
+          if-no-files-found: error
+
+      - name: Keep Hermes available - segment 02 of 7
+        if: success()
+        shell: powershell
+        timeout-minutes: 47
+        run: |
+          $deadline = (Get-Date).AddMinutes(45)
+          while ((Get-Date) -lt $deadline) {
+            Start-Sleep -Seconds 30
+            if (-not (Get-Process -Id ([int]$env:HERMES_DASHBOARD_PID) -ErrorAction SilentlyContinue)) {
+              throw "Hermes process unexpectedly stopped; restore from latest encrypted checkpoint."
+            }
+            if (-not (Get-Process ollama -ErrorAction SilentlyContinue)) {
+              throw "Ollama unexpectedly stopped."
+            }
+          }
+          Write-Host "Finished Hermes segment 02; saving encrypted session checkpoint."
+
+      - name: Encrypt state checkpoint 02
+        if: success()
+        shell: powershell
+        env:
+          HERMES_DASHBOARD_PASSWORD: ${{ secrets.HERMES_DASHBOARD_PASSWORD }}
+        run: |
+          python scripts/hermes_persist.py save --home "$env:LOCALAPPDATA\hermes" --workspace "$env:RUNNER_TEMP\HermesWorkspace" --file "$env:RUNNER_TEMP\hermes-state.enc"
+          if ($LASTEXITCODE -ne 0) { throw "Failed to encrypt Hermes state; no plaintext archive will be uploaded" }
+
+      - name: Save encrypted checkpoint 02 across VM restarts
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hermes-state-${{ github.run_id }}-02
+          path: ${{ runner.temp }}/hermes-state.enc
+          compression-level: 0
+          retention-days: 90
+          if-no-files-found: error
+
+      - name: Keep Hermes available - segment 03 of 7
+        if: success()
+        shell: powershell
+        timeout-minutes: 47
+        run: |
+          $deadline = (Get-Date).AddMinutes(45)
+          while ((Get-Date) -lt $deadline) {
+            Start-Sleep -Seconds 30
+            if (-not (Get-Process -Id ([int]$env:HERMES_DASHBOARD_PID) -ErrorAction SilentlyContinue)) {
+              throw "Hermes process unexpectedly stopped; restore from latest encrypted checkpoint."
+            }
+            if (-not (Get-Process ollama -ErrorAction SilentlyContinue)) {
+              throw "Ollama unexpectedly stopped."
+            }
+          }
+          Write-Host "Finished Hermes segment 03; saving encrypted session checkpoint."
+
+      - name: Encrypt state checkpoint 03
+        if: success()
+        shell: powershell
+        env:
+          HERMES_DASHBOARD_PASSWORD: ${{ secrets.HERMES_DASHBOARD_PASSWORD }}
+        run: |
+          python scripts/hermes_persist.py save --home "$env:LOCALAPPDATA\hermes" --workspace "$env:RUNNER_TEMP\HermesWorkspace" --file "$env:RUNNER_TEMP\hermes-state.enc"
+          if ($LASTEXITCODE -ne 0) { throw "Failed to encrypt Hermes state; no plaintext archive will be uploaded" }
+
+      - name: Save encrypted checkpoint 03 across VM restarts
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hermes-state-${{ github.run_id }}-03
+          path: ${{ runner.temp }}/hermes-state.enc
+          compression-level: 0
+          retention-days: 90
+          if-no-files-found: error
+
+      - name: Keep Hermes available - segment 04 of 7
+        if: success()
+        shell: powershell
+        timeout-minutes: 47
+        run: |
+          $deadline = (Get-Date).AddMinutes(45)
+          while ((Get-Date) -lt $deadline) {
+            Start-Sleep -Seconds 30
+            if (-not (Get-Process -Id ([int]$env:HERMES_DASHBOARD_PID) -ErrorAction SilentlyContinue)) {
+              throw "Hermes process unexpectedly stopped; restore from latest encrypted checkpoint."
+            }
+            if (-not (Get-Process ollama -ErrorAction SilentlyContinue)) {
+              throw "Ollama unexpectedly stopped."
+            }
+          }
+          Write-Host "Finished Hermes segment 04; saving encrypted session checkpoint."
+
+      - name: Encrypt state checkpoint 04
+        if: success()
+        shell: powershell
+        env:
+          HERMES_DASHBOARD_PASSWORD: ${{ secrets.HERMES_DASHBOARD_PASSWORD }}
+        run: |
+          python scripts/hermes_persist.py save --home "$env:LOCALAPPDATA\hermes" --workspace "$env:RUNNER_TEMP\HermesWorkspace" --file "$env:RUNNER_TEMP\hermes-state.enc"
+          if ($LASTEXITCODE -ne 0) { throw "Failed to encrypt Hermes state; no plaintext archive will be uploaded" }
+
+      - name: Save encrypted checkpoint 04 across VM restarts
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hermes-state-${{ github.run_id }}-04
+          path: ${{ runner.temp }}/hermes-state.enc
+          compression-level: 0
+          retention-days: 90
+          if-no-files-found: error
+
+      - name: Keep Hermes available - segment 05 of 7
+        if: success()
+        shell: powershell
+        timeout-minutes: 47
+        run: |
+          $deadline = (Get-Date).AddMinutes(45)
+          while ((Get-Date) -lt $deadline) {
+            Start-Sleep -Seconds 30
+            if (-not (Get-Process -Id ([int]$env:HERMES_DASHBOARD_PID) -ErrorAction SilentlyContinue)) {
+              throw "Hermes process unexpectedly stopped; restore from latest encrypted checkpoint."
+            }
+            if (-not (Get-Process ollama -ErrorAction SilentlyContinue)) {
+              throw "Ollama unexpectedly stopped."
+            }
+          }
+          Write-Host "Finished Hermes segment 05; saving encrypted session checkpoint."
+
+      - name: Encrypt state checkpoint 05
+        if: success()
+        shell: powershell
+        env:
+          HERMES_DASHBOARD_PASSWORD: ${{ secrets.HERMES_DASHBOARD_PASSWORD }}
+        run: |
+          python scripts/hermes_persist.py save --home "$env:LOCALAPPDATA\hermes" --workspace "$env:RUNNER_TEMP\HermesWorkspace" --file "$env:RUNNER_TEMP\hermes-state.enc"
+          if ($LASTEXITCODE -ne 0) { throw "Failed to encrypt Hermes state; no plaintext archive will be uploaded" }
+
+      - name: Save encrypted checkpoint 05 across VM restarts
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hermes-state-${{ github.run_id }}-05
+          path: ${{ runner.temp }}/hermes-state.enc
+          compression-level: 0
+          retention-days: 90
+          if-no-files-found: error
+
+      - name: Keep Hermes available - segment 06 of 7
+        if: success()
+        shell: powershell
+        timeout-minutes: 47
+        run: |
+          $deadline = (Get-Date).AddMinutes(45)
+          while ((Get-Date) -lt $deadline) {
+            Start-Sleep -Seconds 30
+            if (-not (Get-Process -Id ([int]$env:HERMES_DASHBOARD_PID) -ErrorAction SilentlyContinue)) {
+              throw "Hermes process unexpectedly stopped; restore from latest encrypted checkpoint."
+            }
+            if (-not (Get-Process ollama -ErrorAction SilentlyContinue)) {
+              throw "Ollama unexpectedly stopped."
+            }
+          }
+          Write-Host "Finished Hermes segment 06; saving encrypted session checkpoint."
+
+      - name: Encrypt state checkpoint 06
+        if: success()
+        shell: powershell
+        env:
+          HERMES_DASHBOARD_PASSWORD: ${{ secrets.HERMES_DASHBOARD_PASSWORD }}
+        run: |
+          python scripts/hermes_persist.py save --home "$env:LOCALAPPDATA\hermes" --workspace "$env:RUNNER_TEMP\HermesWorkspace" --file "$env:RUNNER_TEMP\hermes-state.enc"
+          if ($LASTEXITCODE -ne 0) { throw "Failed to encrypt Hermes state; no plaintext archive will be uploaded" }
+
+      - name: Save encrypted checkpoint 06 across VM restarts
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hermes-state-${{ github.run_id }}-06
+          path: ${{ runner.temp }}/hermes-state.enc
+          compression-level: 0
+          retention-days: 90
+          if-no-files-found: error
+
+      - name: Keep Hermes available - segment 07 of 7
+        if: success()
+        shell: powershell
+        timeout-minutes: 47
+        run: |
+          $deadline = (Get-Date).AddMinutes(45)
+          while ((Get-Date) -lt $deadline) {
+            Start-Sleep -Seconds 30
+            if (-not (Get-Process -Id ([int]$env:HERMES_DASHBOARD_PID) -ErrorAction SilentlyContinue)) {
+              throw "Hermes process unexpectedly stopped; restore from latest encrypted checkpoint."
+            }
+            if (-not (Get-Process ollama -ErrorAction SilentlyContinue)) {
+              throw "Ollama unexpectedly stopped."
+            }
+          }
+          Write-Host "Finished Hermes segment 07; saving encrypted session checkpoint."
+
+      - name: Encrypt state checkpoint 07
+        if: success()
+        shell: powershell
+        env:
+          HERMES_DASHBOARD_PASSWORD: ${{ secrets.HERMES_DASHBOARD_PASSWORD }}
+        run: |
+          python scripts/hermes_persist.py save --home "$env:LOCALAPPDATA\hermes" --workspace "$env:RUNNER_TEMP\HermesWorkspace" --file "$env:RUNNER_TEMP\hermes-state.enc"
+          if ($LASTEXITCODE -ne 0) { throw "Failed to encrypt Hermes state; no plaintext archive will be uploaded" }
+
+      - name: Save encrypted checkpoint 07 across VM restarts
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hermes-state-${{ github.run_id }}-07
+          path: ${{ runner.temp }}/hermes-state.enc
+          compression-level: 0
+          retention-days: 90
+          if-no-files-found: error
+
+      - name: Stop agent after scheduled backup
+        if: always()
+        shell: powershell
+        run: |
+          if ($env:HERMES_DASHBOARD_PID) {
+            Stop-Process -Id ([int]$env:HERMES_DASHBOARD_PID) -Force -ErrorAction SilentlyContinue
+          }
+          Write-Host "Ephemeral GitHub Actions VM is ending. The latest encrypted artifact remains available for a future run."
