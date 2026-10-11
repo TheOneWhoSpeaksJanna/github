@@ -3,6 +3,9 @@ on:
   push:
     paths:
       - .github/workflows/agent-verify.yml
+      - agent/**
+      - scripts/file-agent-bootstrap.ps1
+      - agent-models.txt
 permissions:
   contents: read
 jobs:
