@@ -13,6 +13,13 @@ Our existing Android Ollama chat remains unchanged. Hermes Agent is a **separate
 
 Hermes Agent has a browser dashboard, but an Ollama-only Android app still talks to the old model server on port 11434 and won't be able to invoke Hermes tools. The Hermes dashboard is the separate agent interface.
 
+## Android keyboard support
+
+Hermes's built-in terminal relies on xterm.js, which sometimes ignores mobile keyboard input even when text paste works. The Windows GitHub workflow now builds a small **native Android message composer** into the dashboard Chat tab. After starting a **new** Hermes run with the updated code, you should see **Type a message here...** and **Send** beneath the terminal on your phone. Type in that box and press Send. The message is forwarded via the original authenticated xterm paste/PTY connection, followed by Enter; no public API, second port, or separate password is introduced.
+
+**Already-running Hermes VMs cannot pick up a new web build automatically**. Your current session can use copy/paste without restarting. When you next start Hermes, the cache should supply the patched mobile dashboard. A newer cache is built independently of the running session. If a new dashboard tab shows an old interface, reload the page after the new VM is running.
+
+
 ## What it can do
 
 Hermes supplies real tool orchestration, such as inspecting files, working on code in a temporary workspace, and other enabled tools. Terminal command approvals are configured as **manual** and unattended dangerous commands are denied. Actions executed by an agent should still be reviewed. The model might call tools incorrectly; an ordinary 2B model will not perform as reliably as a larger model.
