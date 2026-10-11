@@ -41,20 +41,26 @@ jobs:
             if ($err.Count -gt 0) { throw "PowerShell script syntax invalid: $file" }
           }
           Write-Host "Hermes scripts pass syntax preflight."
+          python scripts/hermes-model-config.py selftest
+          if ($LASTEXITCODE -ne 0) { throw "Hermes editable model configuration tests failed" }
+          python scripts/hermes-model-config.py list hermes-models.txt
+          if ($LASTEXITCODE -ne 0) { throw "hermes-models.txt is invalid" }
 
-      - name: Restore cached clean Hermes, Ollama and model
+      - name: Restore cached Hermes runtime and selected models
         id: runtime_cache
         uses: actions/cache/restore@v4
         with:
-          key: hermes-windows2022-pinned79b45d-qwen35-2b-mobile-v2
+          key: hermes-win2022-pinned79b45d-mobile-v3-${{ hashFiles('hermes-models.txt') }}
           restore-keys: |
+            hermes-win2022-pinned79b45d-mobile-v3-
+            hermes-windows2022-pinned79b45d-qwen35-2b-mobile-v2
             hermes-windows2022-pinned79b45d-qwen35-2b-v1
           path: |
             ${{ runner.temp }}/hermes
             ${{ runner.temp }}/ollama-bin
             ${{ runner.temp }}/ollama-models
 
-      - name: Prepare only public binaries and standard model
+      - name: Prepare selected Ollama model(s) from hermes-models.txt
         shell: powershell
         run: |
           & .\scripts\hermes-bootstrap.ps1
@@ -64,7 +70,7 @@ jobs:
         if: steps.runtime_cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
-          key: hermes-windows2022-pinned79b45d-qwen35-2b-mobile-v2
+          key: hermes-win2022-pinned79b45d-mobile-v3-${{ hashFiles('hermes-models.txt') }}
           path: |
             ${{ runner.temp }}/hermes
             ${{ runner.temp }}/ollama-bin
@@ -144,7 +150,7 @@ jobs:
         shell: powershell
         env:
           HERMES_DASHBOARD_PASSWORD: ${{ secrets.HERMES_DASHBOARD_PASSWORD }}
-          HERMES_SESSION_MINUTES: ${{ github.event_name == 'push' && '2' || inputs.session_minutes }}
+          HERMES_SESSION_MINUTES: ${{ inputs.session_minutes }}
         run: |
           & .\scripts\hermes-fast-server.ps1
           if (-not $?) { throw "Hermes dashboard ended with an error" }
