@@ -1,0 +1,5 @@
+# Local File Agent's first uncommented model is the default.
+# List at most four Ollama model IDs, one per line.
+# Use a standard model for file-creation tool workflows.
+qwen2.5-coder:1.5b
+# qwen3.5:2b
