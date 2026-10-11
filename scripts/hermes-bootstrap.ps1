@@ -75,4 +75,32 @@ if (-not (Test-Path $hermes)) {
 & $hermes --version
 if ($LASTEXITCODE -ne 0) { throw "Cached Hermes executable did not run" }
 if (-not (Test-Path $modelManifest)) { throw "Cached Ollama model missing after preparation" }
+
+# Add a real mobile-native textarea to Hermes Chat without opening another
+# unauthenticated API or modifying the Ollama runtime. Reuse the pinned source
+# and rebuild the frontend ONLY when this patch version is missing.
+$projectRoot = Join-Path $env:HERMES_HOME "hermes-agent"
+$chatSource = Join-Path $projectRoot "web\src\pages\ChatPage.tsx"
+$distIndex = Join-Path $projectRoot "hermes_cli\web_dist\index.html"
+$mobileMarker = Join-Path $projectRoot "hermes_cli\web_dist\mobile-composer-v1.marker"
+if (-not (Test-Path $chatSource)) { throw "Hermes ChatPage source not found" }
+& python (Join-Path $env:GITHUB_WORKSPACE "scripts\hermes-mobile-composer.py") $chatSource
+if ($LASTEXITCODE -ne 0) { throw "Hermes Android composer patch failed" }
+if (-not (Test-Path $mobileMarker)) {
+  Write-Host "Building patched Hermes web UI once (Android native text composer)..."
+  Push-Location $projectRoot
+  try {
+    $env:HERMES_WEB_BUILD_LIGHT = "1"
+    & npm run build --workspace web
+    if ($LASTEXITCODE -ne 0) { throw "Hermes mobile web UI build failed" }
+  } finally {
+    Pop-Location
+  }
+  if (-not (Test-Path $distIndex)) { throw "Patched dashboard HTML not produced" }
+  Set-Content -Path $mobileMarker -Value "mobile-composer-v1" -Encoding ASCII
+  Write-Host "Patched Hermes dashboard built."
+} else {
+  Write-Host "Using cached Android-friendly Hermes dashboard."
+}
+
 Write-Host "Hermes and Ollama public binaries prepared. Cache contains no user secrets or conversations."
