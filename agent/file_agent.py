@@ -263,9 +263,10 @@ class FileAgent:
 
 class AgentServer(ThreadingHTTPServer):
     daemon_threads = True
-    def __init__(self, address, agent: FileAgent, password: str, html: str):
+    def __init__(self, address, agent: FileAgent, password: str, html: str,
+                 js: str = "", css: str = ""):
         super().__init__(address, AgentHandler)
-        self.agent, self.password, self.html = agent, password, html
+        self.agent, self.password, self.html, self.js, self.css = agent, password, html, js, css
 
 
 class AgentHandler(BaseHTTPRequestHandler):
@@ -323,8 +324,12 @@ class AgentHandler(BaseHTTPRequestHandler):
             data = self.server.html.encode("utf-8")
             self._headers(200, "text/html; charset=utf-8", len(data))
             return self.wfile.write(data)
-        if path == "/app.js":
-            return self._reply(404, {"error": "Not found"})
+        if path in ("/app.js", "/style.css"):
+            content = self.server.js if path == "/app.js" else self.server.css
+            data = content.encode("utf-8")
+            mime = "text/javascript; charset=utf-8" if path == "/app.js" else "text/css; charset=utf-8"
+            self._headers(200, mime, len(data))
+            return self.wfile.write(data)
         if path == "/api/files":
             return self._reply(200, {"files": workspace_files(self.server.agent.root)})
         if path.startswith("/api/tasks/"):
@@ -341,8 +346,14 @@ class AgentHandler(BaseHTTPRequestHandler):
                 data = file.read_bytes()
             except (AgentError, OSError):
                 return self._reply(404, {"error": "File not found"})
-            self._headers(200, "application/octet-stream", len(data))
-            # Only the last component is used in filename to avoid header injection.
+            self.send_response(200)
+            self.send_header("Content-Type", "application/octet-stream")
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Content-Disposition",
+                             "attachment; filename*=UTF-8''" + urllib.parse.quote(file.name, safe=""))
+            self.end_headers()
             self.wfile.write(data)
             return
         if path == "/download-all.zip":
@@ -396,7 +407,12 @@ def main():
     if len(password) < 14:
         p.error("AGENT_PASSWORD must be at least 14 characters")
     agent = FileAgent(args.workspace, OllamaModel(args.model))
-    server = AgentServer((args.bind, args.port), agent, password, args.html.read_text(encoding="utf-8"))
+    server = AgentServer(
+        (args.bind, args.port), agent, password,
+        args.html.read_text(encoding="utf-8"),
+        args.html.with_name("app.js").read_text(encoding="utf-8"),
+        args.html.with_name("style.css").read_text(encoding="utf-8"),
+    )
     logger.warning("PRIVATE FILE AGENT STARTED, model set, port %d (Tailscale-only access)", args.port)
     try:
         server.serve_forever(poll_interval=0.5)
