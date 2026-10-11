@@ -5,4 +5,4 @@
 # Example alternative (remove the # to install it):
 # qwen3.5:2b
 
-qwen2.5-coder:1.5b
+dagbs/qwen2.5-coder-1.5b-instruct-abliterated
