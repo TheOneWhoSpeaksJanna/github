@@ -1,3 +1,5 @@
+> **ARCHIVED — October 2026:** The old Ollama Chat and Hermes workflows were removed. This file documents historical experiments, not the current service. The active replacement is [Pocket File Agent](FILE_AGENT_SETUP.md) with its [manual GitHub Actions workflow](.github/workflows/file-agent.yml). Earlier encrypted Hermes backup assets remain intact.
+
 # Public runner setup (current status)
 
 The repository is now public. GitHub Actions standard Windows runners for public repositories normally have four allocated logical processors and 16 GB of RAM, subject to verification on each job. No GPU is included.
