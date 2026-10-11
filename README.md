@@ -25,8 +25,13 @@ The optional Hermes workflow caches **only clean, publicly available program fil
 
 Hermes keeps its dashboard alive in **one long-running job step**, while writing AES-256-GCM encrypted local snapshots approximately every 15 minutes. The **latest snapshot is uploaded at the end of the session**, then automatically restored in a later run. Abrupt VM termination or cancellation can lose the current session's changes, even if an earlier encrypted file was created locally. Artifacts expire (up to 90 days). Retain the 14+ character dashboard password because it also decrypts those artifacts; anyone can download public-repo artifacts but cannot read properly encrypted ones without the password. Full details: [Hermes Agent Setup](HERMES_AGENT_SETUP.md).
 
-## Benchmarks
-Open Actions > Public 4-vCPU Model Speed Test > Run workflow. It compares official Qwen2.5 Coder 1.5B and 3B across auto/1/2/4 CPU thread configurations. The Actions run has a summary and a downloadable public-runner-cpu-results artifact. Actual performance varies among runners.
+## Clean Actions setup
+Only two workflows remain in the current repository:
+
+- [Android Ollama over Tailscale](.github/workflows/main.yml): manually start the existing Ollama server for the Android app; the temporary server stays active while its Actions job runs.
+- [Hermes Agent over Tailscale](.github/workflows/hermes-agent.yml): manually start a separate agent dashboard with a password and encrypted state snapshots.
+
+Old CPU/Hermes testing workflows were removed to simplify the Actions list. Their past completed run records remain in GitHub history; removing workflow YAML files does not erase past run logs or artifacts. Historical CPU benchmarks are documented in MODEL_BENCHMARK.md, CPU_TUNING.md and SELECTED_MODEL_SPEED.md.
 
 ## Security after switching visibility
 - Important: Old commit history may contain a hard-coded RDP password. Treat that password as compromised; change or revoke it everywhere it may still work. Deleting it in a new commit does not erase Git history.
