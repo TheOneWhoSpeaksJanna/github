@@ -54,5 +54,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          $ErrorActionPreference = "Continue"
           gh release delete "hermes-checkpoint-smoketest" --repo $env:GITHUB_REPOSITORY --yes --cleanup-tag 2>$null
-          Write-Host "Temporary verification release cleanup attempted."
+          $global:LASTEXITCODE = 0
+          Write-Host "Temporary verification release cleaned if present."
