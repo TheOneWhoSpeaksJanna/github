@@ -8,7 +8,7 @@ if (-not $env:HERMES_DASHBOARD_PASSWORD -or $env:HERMES_DASHBOARD_PASSWORD.Lengt
 $env:HERMES_HOME = Join-Path $env:RUNNER_TEMP "hermes"
 $env:OLLAMA_MODELS = Join-Path $env:RUNNER_TEMP "ollama-models"
 $env:OLLAMA_HOST = "127.0.0.1:11434"
-$env:OLLAMA_CONTEXT_LENGTH = "65536"
+$env:OLLAMA_CONTEXT_LENGTH = "8192"
 $env:OLLAMA_NUM_PARALLEL = "1"
 $env:OLLAMA_MAX_LOADED_MODELS = "1"
 $env:OLLAMA_KEEP_ALIVE = "30m"
@@ -19,6 +19,12 @@ $workdir = Join-Path $env:RUNNER_TEMP "HermesWorkspace"
 New-Item -ItemType Directory -Path $workdir -Force | Out-Null
 $ollama = Join-Path $env:RUNNER_TEMP "ollama-bin\ollama.exe"
 $hermes = Join-Path $env:HERMES_HOME "bin\hermes.exe"
+$modelHelper = Join-Path $env:GITHUB_WORKSPACE "scripts\hermes-model-config.py"
+$modelConfig = Join-Path $env:GITHUB_WORKSPACE "hermes-models.txt"
+$activeModel = & python $modelHelper default $modelConfig
+if ($LASTEXITCODE -ne 0 -or -not $activeModel) { throw "No default Hermes model set in hermes-models.txt" }
+$activeTag = if ($activeModel.Contains(":")) { $activeModel } else { "${activeModel}:latest" }
+Write-Host "Selected agent model from hermes-models.txt: $activeModel"
 if (-not (Test-Path $ollama) -or -not (Test-Path $hermes)) { throw "Prepared Hermes or Ollama binary missing" }
 
 $adapter = Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -eq $env:TAILSCALE_IP } | Select-Object -First 1
@@ -34,8 +40,8 @@ $ready = $false
 for ($i=0; $i -lt 70; $i++) {
   try {
     $models = Invoke-RestMethod "http://127.0.0.1:11434/api/tags" -TimeoutSec 3
-    if (@($models.models | Where-Object { $_.name -like "qwen3.5:2b*" }).Count -eq 0) {
-      throw "Prepared standard model missing"
+    if (@($models.models | Where-Object { $_.name -eq $activeTag }).Count -eq 0) {
+      throw "Selected Ollama model is not installed: $activeModel"
     }
     $ready = $true
     break
@@ -45,15 +51,15 @@ if (-not $ready) {
   if (Test-Path $oerr) { Get-Content $oerr -Tail 25 }
   throw "Cached Ollama backend or model unavailable"
 }
-Write-Host "Cached Ollama and model ready. No download or installation."
+Write-Host "Selected Ollama agent model is ready. No download needed in the serving step."
 
 # Restored private Hermes config (if any) is overridden only for the local
 # model and safer execution defaults. Keep memory, history, skills and sessions.
 $config = @(
-  @("model.default","qwen3.5:2b"),
+  @("model.default",$activeModel),
   @("model.provider","custom"),
   @("model.base_url","http://127.0.0.1:11434/v1"),
-  @("model.context_length","65536"),
+  @("model.context_length","8192"),
   @("approvals.mode","manual"),
   @("approvals.unattended_mode","deny"),
   @("approvals.single_query_mode","deny"),
@@ -91,7 +97,7 @@ if (-not $up) {
   if (Test-Path $err) { Get-Content $err -Tail 25 }
   throw "Authenticated Hermes dashboard failed to start"
 }
-Write-Host "HERMES DASHBOARD STARTED - Tailscale port 9119, owner password required"
+Write-Host "HERMES DASHBOARD STARTED - model $activeModel, Tailscale port 9119, owner password required"
 "## Hermes Agent" | Out-File -Append -FilePath $env:GITHUB_STEP_SUMMARY
 "Private dashboard: find hermes-$env:GITHUB_RUN_ID in Tailscale, use port 9119 and username owner. Never expose this service publicly." | Out-File -Append -FilePath $env:GITHUB_STEP_SUMMARY
 
