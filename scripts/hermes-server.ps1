@@ -85,10 +85,11 @@ for ($i=0; $i -lt 100; $i++) {
   if ($dashboard.HasExited) { break }
   try {
     $check = Invoke-RestMethod -Uri "http://$($env:TAILSCALE_IP):9119/api/status" -TimeoutSec 3
-    if ($check.auth_required -eq $true) { $up = $true; break }
+    if ($check.auth_required -eq $true -and $check.auth_providers -contains "basic") { $up = $true; break }
+    if ($check.auth_required -eq $true -and $check.auth_providers -notcontains "basic") { throw "Dashboard login provider missing - refusing to continue" }
     if ($check.auth_required -eq $false) { throw "Dashboard has no authentication; refusing to continue" }
   } catch {
-    if ($_.Exception.Message -match "has no authentication") { throw }
+    if ($_.Exception.Message -match "has no authentication|login provider missing") { throw }
     Start-Sleep -Seconds 2
   }
 }
