@@ -6,6 +6,7 @@ dashboard password. The public repo's artifacts are readable by other users.
 """
 from __future__ import annotations
 import argparse
+from contextlib import closing
 import io
 import os
 from pathlib import Path, PurePosixPath
@@ -76,8 +77,8 @@ def sqlite_bytes(path: Path) -> bytes:
     with tempfile.TemporaryDirectory() as td:
         target = Path(td) / "snapshot.db"
         # SQLite online backup is WAL-safe even while Hermes is running.
-        with sqlite3.connect("file:" + path.as_posix() + "?mode=ro", uri=True, timeout=30) as src:
-            with sqlite3.connect(str(target)) as dst:
+        with closing(sqlite3.connect("file:" + path.as_posix() + "?mode=ro", uri=True, timeout=30)) as src:
+            with closing(sqlite3.connect(str(target))) as dst:
                 src.backup(dst, pages=100, sleep=0.2)
         return target.read_bytes()
 
@@ -162,9 +163,10 @@ def main():
             (home / ".env").write_text("SECRET_NOT_IN_ARCHIVE")
             work.mkdir()
             (work / "hello.py").write_text("print('hello')")
-            with sqlite3.connect(home / "state.db") as db:
-                db.execute("CREATE TABLE sessions (value TEXT)")
-                db.execute("INSERT INTO sessions VALUES ('persisted')")
+            with closing(sqlite3.connect(home / "state.db")) as db:
+                with db:
+                    db.execute("CREATE TABLE sessions (value TEXT)")
+                    db.execute("INSERT INTO sessions VALUES ('persisted')")
             pw = b"test-value-only-not-a-real-password"
             backup = root / "encrypted.bin"
             save(home, work, backup, pw)
@@ -176,7 +178,7 @@ def main():
             restore(home, work, backup, pw)
             assert (home / "memories" / "test.md").read_text() == "Memory survives a runner restart."
             assert (work / "hello.py").read_text() == "print('hello')"
-            with sqlite3.connect(home / "state.db") as db:
+            with closing(sqlite3.connect(home / "state.db")) as db:
                 assert db.execute("SELECT value FROM sessions").fetchone()[0] == "persisted"
             try:
                 restore(home, work, backup, b"wrong-password-value")
