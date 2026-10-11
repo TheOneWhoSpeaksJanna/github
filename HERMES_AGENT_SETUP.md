@@ -1,3 +1,5 @@
+> **ARCHIVED — October 2026:** The old Ollama Chat and Hermes workflows were removed. This file documents historical experiments, not the current service. The active replacement is [Pocket File Agent](FILE_AGENT_SETUP.md) with its [manual GitHub Actions workflow](.github/workflows/file-agent.yml). Earlier encrypted Hermes backup assets remain intact.
+
 # Hermes Agent (experimental) on GitHub Actions
 
 Our existing Android Ollama chat remains unchanged. Hermes Agent is a **separate tool-using application**; merely installing it will not turn an Ollama-only Android client into an agent. The standalone agent workflow starts the model chosen in the editable [hermes-models.txt](hermes-models.txt) file and a password-protected Hermes dashboard.
