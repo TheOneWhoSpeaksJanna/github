@@ -98,6 +98,7 @@ def safe_path(root: Path, filename: str) -> Path:
 
 
 def workspace_files(root: Path):
+    root = root.resolve()
     result = []
     if not root.exists():
         return result
@@ -113,6 +114,7 @@ def workspace_files(root: Path):
 
 
 def write_files(root: Path, entries: list):
+    root = root.resolve()
     if not isinstance(entries, list) or len(entries) > MAX_FILES_PER_TASK:
         raise AgentError("Model returned too many files")
     existing = workspace_files(root)
@@ -154,6 +156,7 @@ def write_files(root: Path, entries: list):
 
 
 def make_zip(root: Path) -> bytes:
+    root = root.resolve()
     output = io.BytesIO()
     with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as z:
         for info in workspace_files(root):
