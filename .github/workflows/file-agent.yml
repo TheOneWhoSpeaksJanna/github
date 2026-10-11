@@ -119,10 +119,10 @@ jobs:
           New-Item -ItemType Directory -Force -Path $folder | Out-Null
           & gh release download "file-agent-encrypted-checkpoints" --repo $env:GITHUB_REPOSITORY --pattern $latest.name --dir $folder
           if ($LASTEXITCODE -ne 0) { throw "Cannot retrieve previous encrypted file workspace" }
-          $home = Join-Path $env:RUNNER_TEMP "FileAgentState"
+          $stateHome = Join-Path $env:RUNNER_TEMP "FileAgentState"
           $workspace = Join-Path $env:RUNNER_TEMP "FileAgentWorkspace"
           $enc = Join-Path $folder $latest.name
-          & python scripts/hermes_persist.py restore --home $home --workspace $workspace --file $enc
+          & python scripts/hermes_persist.py restore --home $stateHome --workspace $workspace --file $enc
           if ($LASTEXITCODE -ne 0) { throw "Encrypted workspace could not be restored; keep the existing password" }
           Write-Host "Recovered previous encrypted file-agent workspace."
 
