@@ -1,3 +1,5 @@
+> **ARCHIVED — October 2026:** The old Ollama Chat and Hermes workflows were removed. This file documents historical experiments, not the current service. The active replacement is [Pocket File Agent](FILE_AGENT_SETUP.md) with its [manual GitHub Actions workflow](.github/workflows/file-agent.yml). Earlier encrypted Hermes backup assets remain intact.
+
 # Hermes Agent local model performance and PC diagnostics
 
 This is the reproducible performance guide for the Windows GitHub Actions
