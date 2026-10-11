@@ -1,12 +1,18 @@
 name: Public 4-vCPU Model Speed Test
 on:
   workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/public-cpu-benchmark.yml
 permissions:
   contents: read
 jobs:
   speed-test:
     runs-on: windows-2022
     timeout-minutes: 35
+    concurrency:
+      group: public-cpu-benchmark
+      cancel-in-progress: true
     steps:
       - name: Show actual runner hardware
         shell: powershell
