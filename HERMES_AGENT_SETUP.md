@@ -22,7 +22,7 @@ The **only file you need to edit is [hermes-models.txt](hermes-models.txt)** (th
 - By default, the file chooses standard `qwen2.5-coder:1.5b` for lower CPU usage. For example, you can switch the default to `qwen3.5:2b` by making it the first uncommented line.
 - Changes apply **only on the next manual Hermes workflow run**. Do not cancel a working session just to change model files; abrupt cancellation can lose the current session's local history before upload.
 - A changed list gets a separate reusable cache. Already downloaded models are reused when possible; new models may require extra download time and disk/RAM. The workflow refuses more than four models to avoid unbounded downloads.
-- The default Hermes/Ollama context has been reduced to **8,192 tokens** for lower CPU overhead. A small coding model might struggle with complex multi-tool agent tasks; the workflow can select a model but cannot guarantee it will handle all Hermes tools reliably.
+- Hermes Agent requires **at least 64,000 context tokens** for tool use. The Windows server now configures **65,536** for both Ollama and Hermes (`model.ollama_num_ctx`). Choosing a 1.5B model can still be slow or unreliable for tool use. Models advertised with smaller native context windows may degrade when requested to run at 65K.
 
 ## Android keyboard support
 
@@ -35,7 +35,7 @@ Hermes's built-in terminal relies on xterm.js, which sometimes ignores mobile ke
 
 Hermes supplies real tool orchestration, such as inspecting files, working on code in a temporary workspace, and other enabled tools. Terminal command approvals are configured as **manual** and unattended dangerous commands are denied. Actions executed by an agent should still be reviewed. The model might call tools incorrectly; an ordinary 2B model will not perform as reliably as a larger model.
 
-Hermes now reads its model from `hermes-models.txt` and uses an **8,192-token default context**. Tool schemas and larger conversations can still slow down CPU inference, even when the same model is fast in a plain Ollama chat.
+Hermes reads the default model from `hermes-models.txt` and requires **65,536 tokens of configured Ollama runtime context** (`OLLAMA_CONTEXT_LENGTH=65536`, `model.ollama_num_ctx=65536`, and `model.context_length=65536`). The previous 8,192 setting caused Hermes to refuse tool-enabled sessions. Your selected Qwen2.5-Coder variant is advertised by Ollama as **32K native context**, so a 65K configuration goes beyond the listed capacity. Loading 65K on a CPU can be slower and less accurate than ordinary Ollama chat. Changing files in GitHub does not update already-running Windows VMs; shut down with operation=stop and start a new run to apply changes.
 
 ## Faster startup and secure software caching
 
