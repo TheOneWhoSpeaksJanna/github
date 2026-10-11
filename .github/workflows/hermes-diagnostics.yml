@@ -10,10 +10,6 @@ on:
           - '90'
           - '150'
         default: '90'
-  push:
-    paths:
-      - .github/workflows/hermes-diagnostics.yml
-
 permissions:
   contents: read
 
