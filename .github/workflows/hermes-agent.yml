@@ -46,7 +46,9 @@ jobs:
         id: runtime_cache
         uses: actions/cache/restore@v4
         with:
-          key: hermes-windows2022-pinned79b45d-qwen35-2b-v1
+          key: hermes-windows2022-pinned79b45d-qwen35-2b-mobile-v2
+          restore-keys: |
+            hermes-windows2022-pinned79b45d-qwen35-2b-v1
           path: |
             ${{ runner.temp }}/hermes
             ${{ runner.temp }}/ollama-bin
@@ -62,7 +64,7 @@ jobs:
         if: steps.runtime_cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
-          key: hermes-windows2022-pinned79b45d-qwen35-2b-v1
+          key: hermes-windows2022-pinned79b45d-qwen35-2b-mobile-v2
           path: |
             ${{ runner.temp }}/hermes
             ${{ runner.temp }}/ollama-bin
