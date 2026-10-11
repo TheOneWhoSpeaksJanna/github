@@ -22,7 +22,9 @@ try {
 }
 if (-not $releaseExists) {
   Write-Host "Creating dedicated encrypted checkpoint prerelease."
-  & gh release create $Tag --repo $Repository --target main --title "Encrypted Hermes checkpoints" --notes "Rolling AES-256-GCM encrypted Hermes state. No plaintext user data. Encrypted release assets are downloadable on this public repository." --prerelease
+  $title = if ($Tag -eq "file-agent-encrypted-checkpoints") { "Encrypted File Agent workspaces" } else { "Encrypted Hermes checkpoints" }
+  $notes = "Rolling AES-256-GCM encrypted agent state. No plaintext user data in release assets. This repository is public, so keep the decryption password private."
+  & gh release create $Tag --repo $Repository --target main --title $title --notes $notes --prerelease
   if ($LASTEXITCODE -ne 0) { throw "Could not create checkpoint release" }
 }
 $destDir = Join-Path $env:RUNNER_TEMP "hermes-checkpoint-upload"
