@@ -47,14 +47,33 @@ The dashboard and local Ollama backend now run inside **one continuous GitHub Ac
 
 Hermes starts **only when you manually run the workflow**; code commits no longer launch additional experimental servers. The Run workflow dialog defaults to a 300-minute session, and you can choose 1-310 minutes. Two short successful October 11 tests verified dashboard startup and encrypted artifact upload.
 
+## Save automatically every 10 minutes and shut down safely
+
+The GitHub runner cannot stay running after a workflow stops, but Hermes now **saves and uploads an AES-256-GCM encrypted backup off the VM at startup, every 10 minutes, and during graceful shutdown**. These rolling checkpoint files are placed in a dedicated [GitHub prerelease](https://github.com/TheOneWhoSpeaksJanna/github/releases/tag/hermes-encrypted-checkpoints). The latest eight checkpoints are retained. On a new run, Hermes restores the newest rolling checkpoint automatically, falling back to a completed-run Actions artifact when no rolling release exists.
+
+**To turn Hermes off without losing the latest conversation:**
+
+1. Open [Hermes Agent Actions](https://github.com/TheOneWhoSpeaksJanna/github/actions/workflows/hermes-agent.yml).
+2. Tap **Run workflow** (this sends a separate command; it does not start a second VM when Stop is selected).
+3. Under **operation**, choose **stop** rather than **start**. Leave the session length alone, and press **Run workflow**.
+4. The live Hermes job checks for this Stop signal roughly every 45 seconds, uploads a **final encrypted backup**, closes Hermes and Ollama, and then lets the normal 90-day encrypted Actions artifact upload step finish.
+5. Wait until the original **Hermes start** run ends normally. Once the job ends, the Windows VM is automatically removed by GitHub.
+
+**Do not press the Cancel workflow button for an ordinary shutdown.** Cancel kills the process abruptly; the latest *remote* 10-minute checkpoint should survive, but changes since that upload may be lost. A network/upload failure may also delay a checkpoint. The running VM's local snapshots are not permanent, so verify the GitHub backup uploads succeed in the job log.
+
+**Backup scope:** Hermes sessions, memory, configuration, skills, and user workspace files in the curated state snapshot (up to 65 MB total, with individual file limits). It **does not** back up the Windows operating system, installed binaries, Ollama model files, hidden credentials, or all temporary directories. Those programs/models are downloaded or restored from a separate clean public software cache.
+
+**Privacy:** This repository is public, so anyone may download the release assets and completed-run artifacts. The backup files are encrypted before uploading. Use a unique, strong dashboard password and keep it saved; that same password is needed to decrypt old checkpoints.
+
 ## Running time, limitations and security
 
-- GitHub-hosted runners are temporary. Hermes checks the running service and creates **AES-256-GCM encrypted snapshots locally approximately every 15 minutes**. On a normal end, it uploads the latest encrypted snapshot as a GitHub Actions artifact and restores that snapshot at the start of the next run. Application binaries and the Ollama model are restored from a separate clean software cache, not from the private backup.
-- **Snapshots are GitHub Actions artifacts with up to 90 days retention and are readable/downloadable by others because this repository is public. Only AES-256-GCM encrypted ciphertext is uploaded**, never plaintext files. Do not use this as your only important backup. If you need long-term storage, download the encrypted artifact to a trusted private location before it expires.
-- **Backup limitation:** Snapshots are uploaded only **when the workflow step finishes**, not while it is still serving requests. If GitHub abruptly kills the VM or the job is cancelled, the entire current run's changes may be lost. Earlier uploaded backups remain available. Do not rely on this setup as your only copy of important information. Changing the dashboard password makes old backups unreadable without the original password.
-- The repository is public. Never commit passwords, model API tokens, or Tailscale credentials. Old Git history and Action logs can be viewed publicly, and past RDP passwords should be rotated.
-- The dashboard is bound only to the runner's Tailscale address and requires a separate password, unlike a standard Ollama endpoint. Never publish a tunnel to it.
-- Historical dedicated smoke-test workflows were removed to simplify the repository. The main Hermes workflow still runs an encryption self-test before loading private data. The recent two-minute runs verified dashboard startup and encrypted artifact uploads; they did not prove all agent tools work on CPU.
-- Existing selected-model.txt and main.yml are not changed. If Hermes does not start or requires too many resources, your original Android chat continues to work.
+- GitHub-hosted Windows runners are temporary, so Hermes is not an always-on permanent VM. Run length is at most 310 minutes plus initialization time.
+- Rolling encrypted checkpoints are uploaded at startup and every 10 minutes, plus final graceful shutdown. This uses a separate GitHub prerelease so files exist outside the VM **during** the run. The most recent eight rolling snapshots are kept.
+- The normal completed-run **Actions artifact** is still uploaded after Hermes exits, with up to 90-day retention. If the job is force-cancelled, that final artifact may not upload, but prior off-VM rolling checkpoints should still exist.
+- A failed network operation, disk capacity issue, or oversized user data can prevent a backup. Do not use public GitHub Actions as your only store for important files.
+- You must keep the original `HERMES_DASHBOARD_PASSWORD` to restore old encrypted checkpoints. Rotating the secret makes previous backups unreadable without the old password.
+- Never put GitHub tokens, passwords or Tailscale keys into repository files or Hermes prompts. Credentials are excluded from the curated snapshot, and the public repository's old commit history can be viewed.
+- The Hermes dashboard is bound only to its private Tailscale IP and requires a password. Do not publish port 9119 to the internet.
+- Existing `selected-model.txt` and `main.yml` for your Android Ollama setup are unchanged.
 
 Official references: [Hermes Windows installation](https://hermes-agent.nousresearch.com/docs/user-guide/windows-native), [Hermes local Ollama guide](https://hermes-agent.nousresearch.com/docs/guides/local-ollama-setup), and [Hermes dashboard authentication](https://hermes-agent.nousresearch.com/docs/user-guide/features/web-dashboard).
