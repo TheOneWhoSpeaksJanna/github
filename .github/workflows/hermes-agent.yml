@@ -17,7 +17,8 @@ permissions:
 
 concurrency:
   group: hermes-agent-server
-  cancel-in-progress: false
+  # Supersede stale experimental starts when a corrected workflow is pushed.
+  cancel-in-progress: true
 
 jobs:
   hermes:
