@@ -1,6 +1,5 @@
-# Upload a previously AES-256-GCM encrypted Hermes backup to a rolling
-# GitHub Release. Called inside the long-running Hermes job, so the backup
-# survives VM cancellation/crashes. Only ciphertext is uploaded.
+# Upload only AES-256-GCM encrypted Hermes state to a rolling prerelease.
+# Each checkpoint is remotely durable even while its Actions job keeps running.
 param(
   [Parameter(Mandatory=$true)][string]$EncryptedFile,
   [Parameter(Mandatory=$true)][string]$Repository,
@@ -9,25 +8,22 @@ param(
 )
 $ErrorActionPreference = "Stop"
 if (-not (Test-Path -LiteralPath $EncryptedFile)) { throw "Encrypted backup missing" }
-if (-not $env:GH_TOKEN) { throw "GitHub upload token was not supplied" }
-if ($Repository -notmatch '^[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+$') { throw "Invalid GitHub repository" }
-if ($Tag -notmatch '^[a-zA-Z0-9_.-]+
-# A dedicated prerelease makes the checkpoint assets accessible to the GitHub
-# REST API during a running job, unlike end-of-job Actions artifacts.
-# gh returns 404 on first use. Do not turn the expected missing-release
-# stderr into a terminating PowerShell NativeCommandError.
-$priorErrorAction = $ErrorActionPreference
+if (-not $env:GH_TOKEN) { throw "GitHub upload token missing" }
+if ($Repository -notmatch '^[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+$') { throw "Invalid repository name" }
+if ($Tag -notmatch '^[a-zA-Z0-9_.-]+$') { throw "Invalid release tag" }
+# Expected 404 on the first session; don't treat native stderr as fatal.
+$previousErrorAction = $ErrorActionPreference
 $ErrorActionPreference = "Continue"
 try {
-  $releaseInfo = & gh api "repos/$Repository/releases/tags/$tag" 2>$null
+  $releaseData = & gh api "repos/$Repository/releases/tags/$Tag" 2>$null
   $releaseExists = ($LASTEXITCODE -eq 0)
 } finally {
-  $ErrorActionPreference = $priorErrorAction
+  $ErrorActionPreference = $previousErrorAction
 }
 if (-not $releaseExists) {
-  Write-Host "Creating first dedicated encrypted checkpoint release."
-  & gh release create $tag --repo $Repository --target main --title "Encrypted Hermes checkpoints" --notes "Rolling encrypted Hermes state backups. Assets contain AES-256-GCM ciphertext, not plaintext. This release is an internal backup mechanism." --prerelease
-  if ($LASTEXITCODE -ne 0) { throw "Could not create checkpoint release; check workflow contents:write permission" }
+  Write-Host "Creating dedicated encrypted checkpoint prerelease."
+  & gh release create $Tag --repo $Repository --target main --title "Encrypted Hermes checkpoints" --notes "Rolling AES-256-GCM encrypted Hermes state. No plaintext user data. Encrypted release assets are downloadable on this public repository." --prerelease
+  if ($LASTEXITCODE -ne 0) { throw "Could not create checkpoint release" }
 }
 $destDir = Join-Path $env:RUNNER_TEMP "hermes-checkpoint-upload"
 New-Item -ItemType Directory -Force -Path $destDir | Out-Null
@@ -36,56 +32,19 @@ $name = "hermes-state-$RunId-$stamp.enc"
 $staged = Join-Path $destDir $name
 Copy-Item -LiteralPath $EncryptedFile -Destination $staged -Force
 try {
-  & gh release upload $tag $staged --repo $Repository
+  & gh release upload $Tag $staged --repo $Repository
   if ($LASTEXITCODE -ne 0) { throw "Encrypted checkpoint upload failed" }
-  Write-Host "Encrypted Hermes backup uploaded as a GitHub release asset: $name"
-  # Keep only the latest 8 live checkpoints (80 min at 10-min intervals).
-  # The final Actions artifact from a successfully completed run is retained
-  # separately for up to 90 days.
-  $release = & gh api "repos/$Repository/releases/tags/$tag" | ConvertFrom-Json
+  Write-Host "Encrypted Hermes state saved off-VM as release asset: $name"
+  # Retain eight recent backups for rolling recovery. A successful final
+  # job also creates a separate 90-day encrypted Actions artifact.
+  $release = & gh api "repos/$Repository/releases/tags/$Tag" | ConvertFrom-Json
   if ($LASTEXITCODE -ne 0) {
-    Write-Warning "Could not list older checkpoint assets; leaving them untouched."
+    Write-Warning "Could not list checkpoints to prune; leaving them intact."
   } else {
     $old = @($release.assets | Where-Object { $_.name -like "hermes-state-*.enc" } | Sort-Object created_at -Descending | Select-Object -Skip 8)
     foreach ($item in $old) {
       & gh api -X DELETE "repos/$Repository/releases/assets/$($item.id)" | Out-Null
-      if ($LASTEXITCODE -ne 0) { Write-Warning "Could not prune an older encrypted checkpoint." }
-    }
-  }
-} finally {
-  Remove-Item -LiteralPath $staged -Force -ErrorAction SilentlyContinue
-}
-) { throw "Invalid checkpoint release tag" }
-$tag = $Tag
-# A dedicated prerelease makes the checkpoint assets accessible to the GitHub
-# REST API during a running job, unlike end-of-job Actions artifacts.
-$releaseInfo = & gh api "repos/$Repository/releases/tags/$tag" 2>$null
-if ($LASTEXITCODE -ne 0) {
-  Write-Host "Creating first dedicated encrypted checkpoint release."
-  & gh release create $tag --repo $Repository --target main --title "Encrypted Hermes checkpoints" --notes "Rolling encrypted Hermes state backups. Assets contain AES-256-GCM ciphertext, not plaintext. This release is an internal backup mechanism." --prerelease
-  if ($LASTEXITCODE -ne 0) { throw "Could not create checkpoint release; check workflow contents:write permission" }
-}
-$destDir = Join-Path $env:RUNNER_TEMP "hermes-checkpoint-upload"
-New-Item -ItemType Directory -Force -Path $destDir | Out-Null
-$stamp = (Get-Date).ToUniversalTime().ToString("yyyyMMddTHHmmssfff")
-$name = "hermes-state-$RunId-$stamp.enc"
-$staged = Join-Path $destDir $name
-Copy-Item -LiteralPath $EncryptedFile -Destination $staged -Force
-try {
-  & gh release upload $tag $staged --repo $Repository
-  if ($LASTEXITCODE -ne 0) { throw "Encrypted checkpoint upload failed" }
-  Write-Host "Encrypted Hermes backup uploaded as a GitHub release asset: $name"
-  # Keep only the latest 8 live checkpoints (80 min at 10-min intervals).
-  # The final Actions artifact from a successfully completed run is retained
-  # separately for up to 90 days.
-  $release = & gh api "repos/$Repository/releases/tags/$tag" | ConvertFrom-Json
-  if ($LASTEXITCODE -ne 0) {
-    Write-Warning "Could not list older checkpoint assets; leaving them untouched."
-  } else {
-    $old = @($release.assets | Where-Object { $_.name -like "hermes-state-*.enc" } | Sort-Object created_at -Descending | Select-Object -Skip 8)
-    foreach ($item in $old) {
-      & gh api -X DELETE "repos/$Repository/releases/assets/$($item.id)" | Out-Null
-      if ($LASTEXITCODE -ne 0) { Write-Warning "Could not prune an older encrypted checkpoint." }
+      if ($LASTEXITCODE -ne 0) { Write-Warning "Could not prune one older encrypted checkpoint." }
     }
   }
 } finally {
