@@ -51,7 +51,7 @@ jobs:
       - name: Verify PowerShell scripts
         shell: powershell
         run: |
-          $files = @("scripts\hermes-bootstrap.ps1", "scripts\hermes-fast-server.ps1")
+          $files = @("scripts\hermes-bootstrap.ps1", "scripts\hermes-fast-server.ps1", "scripts\hermes-checkpoint.ps1")
           foreach ($file in $files) {
             $data = [IO.File]::ReadAllBytes((Resolve-Path $file).Path)
             if (@($data | Where-Object { $_ -gt 127 }).Count -gt 0) {
