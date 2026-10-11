@@ -92,8 +92,8 @@ def direct_test(model: str, context: int, timeout: int, base_url: str):
                 "context": context, "error_type": type(e).__name__}
 
 
-def hermes_test(exe: Path, toolsets: str | None, seconds: int, env: dict, outdir: Path):
-    variant = "default" if toolsets is None else toolsets.replace(",", "_")
+def hermes_test(exe: Path, toolsets: str | None, seconds: int, env: dict, outdir: Path, label: str | None = None):
+    variant = label or ("default" if toolsets is None else toolsets.replace(",", "_"))
     cmd = [str(exe), "--oneshot", "Respond with OK only. Do not use any tools."]
     if toolsets is not None:
         cmd += ["--toolsets", toolsets]
@@ -208,6 +208,16 @@ def main():
                 args.hermes, "file", args.hermes_timeout, env, args.out)
             report["tests"]["hermes_default"] = hermes_test(
                 args.hermes, None, args.hermes_timeout, env, args.out)
+            # Verify an explicit zero-tool selection for near-chat-only use.
+            p = subprocess.run([str(args.hermes), "config", "set",
+                                "platform_toolsets.cli", "[]"],
+                               env=env, capture_output=True, text=True, timeout=40)
+            if p.returncode:
+                report["tests"]["hermes_chat_only"] = {"status": "config_error"}
+            else:
+                report["tests"]["hermes_chat_only"] = hermes_test(
+                    args.hermes, None, args.hermes_timeout, env, args.out,
+                    label="chat_only")
         finally:
             server.terminate()
             try:
@@ -227,8 +237,14 @@ def main():
                       f"min_free_gb={value.get('min_free_ram_gb')}")
             print("Hardware:", report["system"])
             print("Report:", report_file)
+            # Windows may keep a logfile open briefly after terminating a
+            # worker process. JSON is the only uploaded artifact; cleanup
+            # must never mark an otherwise successful benchmark as failed.
             for p in args.out.glob("*txt"):
-                p.unlink(missing_ok=True)
+                try:
+                    p.unlink(missing_ok=True)
+                except (PermissionError, OSError):
+                    pass
 
 
 if __name__ == "__main__":
