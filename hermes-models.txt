@@ -1,0 +1,8 @@
+# Hermes Agent Ollama models: ONE MODEL NAME PER LINE.
+# The FIRST uncommented model is the default used when the agent starts.
+# You can add up to three more models on new lines; all listed models install.
+# Start a NEW manual Hermes workflow run after editing this file.
+# Example alternative (remove the # to install it):
+# qwen3.5:2b
+
+dagbs/qwen2.5-coder-1.5b-instruct-abliterated
