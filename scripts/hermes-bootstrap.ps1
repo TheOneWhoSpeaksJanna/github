@@ -12,7 +12,11 @@ $env:NO_PROXY = "127.0.0.1,localhost"
 $binaryDir = Join-Path $env:RUNNER_TEMP "ollama-bin"
 $ollama = Join-Path $binaryDir "ollama.exe"
 $hermes = Join-Path $env:HERMES_HOME "bin\hermes.exe"
-$modelManifest = Join-Path $env:OLLAMA_MODELS "manifests\registry.ollama.ai\library\qwen3.5\2b"
+$modelHelper = Join-Path $env:GITHUB_WORKSPACE "scripts\hermes-model-config.py"
+$modelConfig = Join-Path $env:GITHUB_WORKSPACE "hermes-models.txt"
+$selectedModels = @(& python $modelHelper list $modelConfig)
+if ($LASTEXITCODE -ne 0 -or $selectedModels.Count -eq 0) { throw "Invalid Hermes model list" }
+Write-Host "Hermes default model: $($selectedModels[0]); total configured: $($selectedModels.Count)."
 New-Item -ItemType Directory -Force -Path $env:HERMES_HOME,$env:OLLAMA_MODELS | Out-Null
 if (-not (Test-Path $ollama)) {
   Write-Host "Ollama cache missing. Downloading Windows runtime once."
@@ -28,15 +32,25 @@ if (-not (Test-Path $ollama)) {
   Write-Host "Using cached Ollama runtime. Windows installer skipped."
 }
 
-if (-not (Test-Path $modelManifest)) {
-  Write-Host "Model cache missing. Downloading standard Qwen3.5 2B once."
-  $pulled = $false
-  for ($attempt = 1; $attempt -le 3; $attempt++) {
+# No hardcoded default model. The first uncommented line of hermes-models.txt
+# is the agent model; additional lines are installed too. Check Ollama manifests
+# before pulling so an exact cache hit requires no network downloads.
+$missingModels = @()
+foreach ($modelName in $selectedModels) {
+  $manifest = & python $modelHelper manifest $modelConfig --models-root $env:OLLAMA_MODELS --model $modelName
+  if ($LASTEXITCODE -ne 0) { throw "Invalid Ollama model name in Hermes file" }
+  if (-not (Test-Path $manifest)) { $missingModels += $modelName }
+}
+if ($missingModels.Count -gt 0) {
+  Write-Host "Downloading $($missingModels.Count) additional model(s) selected in hermes-models.txt."
+  for ($attempt = 1; $attempt -le 4 -and $missingModels.Count -gt 0; $attempt++) {
     Get-Process -Name ollama -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
     Start-Sleep -Seconds 2
-    $proc = Start-Process -FilePath $ollama -ArgumentList "serve" -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $env:RUNNER_TEMP "ollama-bootstrap.stdout.log") -RedirectStandardError (Join-Path $env:RUNNER_TEMP "ollama-bootstrap.stderr.log")
+    $log = Join-Path $env:RUNNER_TEMP "ollama-model-bootstrap-$attempt.stdout.log"
+    $err = Join-Path $env:RUNNER_TEMP "ollama-model-bootstrap-$attempt.stderr.log"
+    $proc = Start-Process -FilePath $ollama -ArgumentList "serve" -WindowStyle Hidden -PassThru -RedirectStandardOutput $log -RedirectStandardError $err
     $ready = $false
-    for ($i=0; $i -lt 45; $i++) {
+    for ($i = 0; $i -lt 45; $i++) {
       if ($proc.HasExited) { break }
       try {
         Invoke-RestMethod "http://127.0.0.1:11434/api/tags" -TimeoutSec 3 | Out-Null
@@ -45,22 +59,28 @@ if (-not (Test-Path $modelManifest)) {
       } catch { Start-Sleep -Seconds 2 }
     }
     if (-not $ready) {
-      Write-Warning "Ollama API failed to start on attempt $attempt."
+      Write-Warning "Ollama API failed to start for model downloads (attempt $attempt)."
       continue
     }
-    & $ollama pull "qwen3.5:2b"
-    if ($LASTEXITCODE -eq 0 -and (Test-Path $modelManifest)) {
-      $pulled = $true
-      Write-Host "Model downloaded and manifest verified."
-      break
+    $remaining = @()
+    foreach ($modelName in $missingModels) {
+      Write-Host "Installing Hermes Ollama model: $modelName"
+      & $ollama pull $modelName
+      $manifest = & python $modelHelper manifest $modelConfig --models-root $env:OLLAMA_MODELS --model $modelName
+      if ($LASTEXITCODE -ne 0) { throw "Could not resolve model manifest" }
+      if (-not (Test-Path $manifest)) {
+        Write-Warning "Model not ready: $modelName"
+        $remaining += $modelName
+      }
     }
-    Write-Warning "Model pull failed; retrying after server restart."
-    Start-Sleep -Seconds (3 * $attempt)
+    $missingModels = @($remaining)
+    if ($missingModels.Count -gt 0) { Start-Sleep -Seconds (3 * $attempt) }
   }
-  if (-not $pulled) { throw "Model pull never succeeded; cannot cache incomplete model files." }
+  if ($missingModels.Count -gt 0) { throw "Some models in hermes-models.txt failed to download" }
 } else {
-  Write-Host "Using cached Qwen3.5 2B model. Download skipped."
+  Write-Host "All requested Hermes models found in the clean cache. No download needed."
 }
+
 Get-Process -Name ollama -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 
 if (-not (Test-Path $hermes)) {
@@ -74,7 +94,11 @@ if (-not (Test-Path $hermes)) {
 }
 & $hermes --version
 if ($LASTEXITCODE -ne 0) { throw "Cached Hermes executable did not run" }
-if (-not (Test-Path $modelManifest)) { throw "Cached Ollama model missing after preparation" }
+# Confirm all configured Ollama manifests exist before caching public model files.
+foreach ($modelName in $selectedModels) {
+  $manifest = & python $modelHelper manifest $modelConfig --models-root $env:OLLAMA_MODELS --model $modelName
+  if ($LASTEXITCODE -ne 0 -or -not (Test-Path $manifest)) { throw "Required Hermes model was not prepared: $modelName" }
+}
 
 # Add a real mobile-native textarea to Hermes Chat without opening another
 # unauthenticated API or modifying the Ollama runtime. Reuse the pinned source
