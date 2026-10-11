@@ -1,6 +1,9 @@
 name: Hermes Agent over Tailscale (Experimental)
 on:
   workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/hermes-agent.yml
 permissions:
   contents: read
   actions: read
@@ -15,6 +18,23 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+
+      - name: Check Hermes PowerShell script syntax before startup
+        shell: powershell
+        run: |
+          $file = (Resolve-Path ".\scripts\hermes-server.ps1").Path
+          $data = [IO.File]::ReadAllBytes($file)
+          if (@($data | Where-Object { $_ -gt 127 }).Count -gt 0) {
+            throw "Hermes server PowerShell file contains non-ASCII characters that break Windows PowerShell 5.1"
+          }
+          $tokens = $null
+          $parseErrors = $null
+          $null = [System.Management.Automation.Language.Parser]::ParseFile($file, [ref]$tokens, [ref]$parseErrors)
+          if ($parseErrors.Count -gt 0) {
+            $parseErrors | ForEach-Object { Write-Error $_.Message }
+            throw "PowerShell parsing failed; refusing to start Tailscale or Hermes."
+          }
+          Write-Host "Hermes PowerShell 5.1 script syntax verified."
 
       - name: Install snapshot encryption library and self-test
         shell: powershell
