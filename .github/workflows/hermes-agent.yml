@@ -1,7 +1,16 @@
 name: Hermes Agent over Tailscale (Experimental)
+run-name: Hermes ${{ inputs.operation || 'start' }}
 on:
   workflow_dispatch:
     inputs:
+      operation:
+        description: Start Hermes or gracefully stop the running Hermes VM
+        required: true
+        type: choice
+        options:
+          - start
+          - stop
+        default: start
       session_minutes:
         description: Session length in minutes, maximum 310
         required: true
@@ -9,17 +18,30 @@ on:
         default: 300
 
 permissions:
-  contents: read
+  # Required to upload AES-256-GCM encrypted checkpoints to a GitHub prerelease
+  # during the SAME running job; end-of-job artifacts are insufficient on cancel.
+  contents: write
   actions: read
 
-concurrency:
-  group: hermes-fast-v2
-  # Allow only one Hermes VM at a time; a new manual run replaces an older session.
-  cancel-in-progress: true
-
 jobs:
+  stop:
+    name: Graceful stop request
+    if: inputs.operation == 'stop'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Signal Hermes to upload final backup and stop
+        run: |
+          echo "Graceful Hermes Stop requested. The running agent checks Actions every 45 seconds."
+          echo "Do not press Cancel on the running Hermes job; it will finish after encrypting and uploading its last checkpoint."
+
   hermes:
+    if: inputs.operation != 'stop'
     runs-on: windows-2022
+    concurrency:
+      group: hermes-agent-live-vm
+      cancel-in-progress: false
     timeout-minutes: 350
     steps:
       - uses: actions/checkout@v4
@@ -84,6 +106,36 @@ jobs:
           python scripts/hermes_persist.py selftest
           if ($LASTEXITCODE -ne 0) { throw "Encrypted snapshot test failed" }
 
+      - name: Restore latest rolling 10-minute encrypted backup
+        id: live_backup
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = "Continue"
+          $json = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/hermes-encrypted-checkpoints" 2>$null
+          $foundRelease = ($LASTEXITCODE -eq 0)
+          $ErrorActionPreference = "Stop"
+          if (-not $foundRelease) {
+            Write-Host "No rolling Hermes checkpoint release yet; checking completed-run artifacts."
+            exit 0
+          }
+          $release = $json | ConvertFrom-Json
+          $latest = $release.assets | Where-Object { $_.name -like "hermes-state-*.enc" } | Sort-Object created_at -Descending | Select-Object -First 1
+          if (-not $latest) {
+            Write-Host "No rolling Hermes checkpoints yet."
+            exit 0
+          }
+          $dir = Join-Path $env:RUNNER_TEMP "hermes-live-restore"
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          & gh release download "hermes-encrypted-checkpoints" --repo $env:GITHUB_REPOSITORY --pattern $latest.name --dir $dir
+          if ($LASTEXITCODE -ne 0) { throw "Could not download the encrypted rolling backup" }
+          $downloaded = Join-Path $dir $latest.name
+          if (-not (Test-Path $downloaded)) { throw "Rolling backup download missing" }
+          Copy-Item $downloaded (Join-Path $dir "hermes-state.enc")
+          "found=true" >> $env:GITHUB_OUTPUT
+          Write-Host "Latest off-VM 10-minute encrypted Hermes checkpoint restored to runner."
+
       - name: Locate latest previous encrypted state
         id: snapshot
         shell: powershell
@@ -107,7 +159,7 @@ jobs:
           }
 
       - name: Download encrypted session backup
-        if: steps.snapshot.outputs.name != ''
+        if: steps.snapshot.outputs.name != '' && steps.live_backup.outputs.found != 'true'
         uses: actions/download-artifact@v4
         with:
           name: ${{ steps.snapshot.outputs.name }}
@@ -116,12 +168,16 @@ jobs:
           path: ${{ runner.temp }}/hermes-restore
 
       - name: Restore private memory, sessions and work files
-        if: steps.snapshot.outputs.name != ''
+        if: steps.snapshot.outputs.name != '' || steps.live_backup.outputs.found == 'true'
         shell: powershell
         env:
           HERMES_DASHBOARD_PASSWORD: ${{ secrets.HERMES_DASHBOARD_PASSWORD }}
         run: |
-          python scripts/hermes_persist.py restore --home "$env:RUNNER_TEMP\hermes" --workspace "$env:RUNNER_TEMP\HermesWorkspace" --file "$env:RUNNER_TEMP\hermes-restore\hermes-state.enc"
+          $file = "$env:RUNNER_TEMP\hermes-restore\hermes-state.enc"
+          if ("${{ steps.live_backup.outputs.found }}" -eq "true") {
+            $file = "$env:RUNNER_TEMP\hermes-live-restore\hermes-state.enc"
+          }
+          python scripts/hermes_persist.py restore --home "$env:RUNNER_TEMP\hermes" --workspace "$env:RUNNER_TEMP\HermesWorkspace" --file $file
           if ($LASTEXITCODE -ne 0) { throw "Encrypted memory restore failed; backup may use a different password" }
 
       - name: Authenticate private Tailscale connection
@@ -151,6 +207,7 @@ jobs:
         env:
           HERMES_DASHBOARD_PASSWORD: ${{ secrets.HERMES_DASHBOARD_PASSWORD }}
           HERMES_SESSION_MINUTES: ${{ inputs.session_minutes }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           & .\scripts\hermes-fast-server.ps1
           if (-not $?) { throw "Hermes dashboard ended with an error" }
