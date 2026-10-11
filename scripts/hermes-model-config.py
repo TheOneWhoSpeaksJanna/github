@@ -60,18 +60,17 @@ def selftest():
         p.write_text(
             "# comment only\n"
             "qwen2.5-coder:1.5b\n"
-            "# qwen3.5:2b\n"
+            "# alternative ignored\n"
             "qwen3.5:2b\n",
             encoding="utf-8",
         )
         names = model_names(p)
-        assert len(names) == 2
-        assert names[0] == "qwen2.5-coder:1.5b"
+        assert names == ["qwen2.5-coder:1.5b", "qwen3.5:2b"]
         assert str(manifest_path(Path("X:/models"), names[0])).replace("\\", "/").endswith(
-            "/manifests/registry.ollama.ai/qwen2.5-coder:1.5b/latest"
+            "/manifests/registry.ollama.ai/library/qwen2.5-coder/1.5b"
         )
         assert str(manifest_path(Path("X:/models"), names[1])).replace("\\", "/").endswith(
-            "/manifests/registry.ollama.ai/library/qwen2.5-coder/1.5b"
+            "/manifests/registry.ollama.ai/library/qwen3.5/2b"
         )
         p.write_text("../unsafe\n", encoding="utf-8")
         try:
@@ -87,8 +86,15 @@ def selftest():
             pass
         else:
             raise AssertionError("Duplicate model accepted")
+        p.write_text("qwen3.5:2b\nqwen2.5-coder:1.5b\n"
+                     "qwen2.5-coder:3b\nqwen2.5-coder:7b\nqwen3:1.7b\n", encoding="utf-8")
+        try:
+            model_names(p)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("Too many models accepted")
     print("Hermes model file parsing, validation, defaults and cache paths verified.")
-
 
 def main():
     parser = argparse.ArgumentParser()
