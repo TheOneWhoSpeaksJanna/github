@@ -11,6 +11,15 @@ on:
           - start
           - stop
         default: start
+      agent_mode:
+        description: "Tools: chat=fast conversations, light=file tools, full=all (slow on CPU)"
+        required: true
+        type: choice
+        options:
+          - light
+          - chat
+          - full
+        default: light
       session_minutes:
         description: Session length in minutes, maximum 310
         required: true
@@ -51,7 +60,7 @@ jobs:
       - name: Verify PowerShell scripts
         shell: powershell
         run: |
-          $files = @("scripts\hermes-bootstrap.ps1", "scripts\hermes-fast-server.ps1", "scripts\hermes-checkpoint.ps1", "scripts\hermes-health.ps1")
+          $files = @("scripts\hermes-bootstrap.ps1", "scripts\hermes-fast-server.ps1", "scripts\hermes-checkpoint.ps1", "scripts\hermes-health.ps1", "scripts\hermes-mode-config.ps1")
           foreach ($file in $files) {
             $data = [IO.File]::ReadAllBytes((Resolve-Path $file).Path)
             if (@($data | Where-Object { $_ -gt 127 }).Count -gt 0) {
@@ -207,6 +216,7 @@ jobs:
         env:
           HERMES_DASHBOARD_PASSWORD: ${{ secrets.HERMES_DASHBOARD_PASSWORD }}
           HERMES_SESSION_MINUTES: ${{ inputs.session_minutes }}
+          HERMES_AGENT_MODE: ${{ inputs.agent_mode }}
           GH_TOKEN: ${{ github.token }}
         run: |
           & .\scripts\hermes-fast-server.ps1
