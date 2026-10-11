@@ -17,8 +17,8 @@ $env:HIP_VISIBLE_DEVICES = "-1"
 $env:NO_PROXY = "127.0.0.1,localhost"
 $env:AGENT_PASSWORD = $env:HERMES_DASHBOARD_PASSWORD
 $workspace = Join-Path $env:RUNNER_TEMP "FileAgentWorkspace"
-$home = Join-Path $env:RUNNER_TEMP "FileAgentState"
-New-Item -ItemType Directory -Force -Path $workspace,$home | Out-Null
+$stateHome = Join-Path $env:RUNNER_TEMP "FileAgentState"
+New-Item -ItemType Directory -Force -Path $workspace,$stateHome | Out-Null
 $helper = Join-Path $env:GITHUB_WORKSPACE "scripts\hermes-model-config.py"
 $model = & python $helper default (Join-Path $env:GITHUB_WORKSPACE "agent-models.txt")
 if ($LASTEXITCODE -ne 0 -or -not $model) { throw "Invalid local task model" }
@@ -77,7 +77,7 @@ $encryptor = Join-Path $env:GITHUB_WORKSPACE "scripts\hermes_persist.py"
 $uploader = Join-Path $env:GITHUB_WORKSPACE "scripts\hermes-checkpoint.ps1"
 $tag = "file-agent-encrypted-checkpoints"
 function Save-EncryptedWorkspace {
-  & python $encryptor save --home $home --workspace $workspace --file $backup
+  & python $encryptor save --home $stateHome --workspace $workspace --file $backup
   if ($LASTEXITCODE -ne 0) { throw "Workspace encryption failed" }
 }
 function Upload-EncryptedWorkspace {
