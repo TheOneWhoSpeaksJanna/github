@@ -19,7 +19,9 @@ This GitHub repository is public. Workflow source, commit history, job logs, rep
 
 ## Optional Hermes Agent (experimental)
 
-Hermes is a separate tool-using agent, not merely another Ollama model alias. Your original Ollama Android chat server stays available as-is. See [Hermes Agent Setup](HERMES_AGENT_SETUP.md) for the optional workflow, private password-protected browser dashboard, and Tailscale connection details. It requires the additional HERMES_DASHBOARD_PASSWORD Actions secret and runs a standard tool-capable model in a separate GitHub job. Its compatibility test is tracked under the Actions tab.
+Hermes is a separate tool-using agent, not merely another Ollama model alias. Your original Ollama Android chat server stays available as-is. See [Hermes Agent Setup](HERMES_AGENT_SETUP.md) for the optional workflow, password-protected browser dashboard and Tailscale connection details.
+
+The separate Hermes workflow now backs up its SQLite conversations, memory, selected configuration, skills, and agent workspace as **AES-256-GCM-encrypted GitHub Actions artifacts about every 45 minutes**. The next run automatically restores the latest compatible snapshot. **The runner remains temporary**, and backups expire (up to 90 days); save an additional encrypted copy privately for long-term storage. Cancelling an agent job may lose the changes since its last checkpoint. The dashboard password, a **random 14+-character password (24+ preferred; not 14 words)**, is also the encryption passphrase, so retain it securely and keep it unchanged across runs. Public artifacts contain only ciphertext, not readable conversation history. The [backup self-test](.github/workflows/hermes-persist-test.yml) passes on GitHub-hosted Windows. The full live agent workflow remains experimental and isn't automatically started.
 
 ## Benchmarks
 Open Actions > Public 4-vCPU Model Speed Test > Run workflow. It compares official Qwen2.5 Coder 1.5B and 3B across auto/1/2/4 CPU thread configurations. The Actions run has a summary and a downloadable public-runner-cpu-results artifact. Actual performance varies among runners.
