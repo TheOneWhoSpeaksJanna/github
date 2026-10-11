@@ -29,15 +29,15 @@ jobs:
         run: |
           & .\scripts\hermes-bootstrap.ps1
           if (-not $?) { throw "Hermes Android frontend build failed" }
-          $home = Join-Path $env:RUNNER_TEMP "hermes\hermes-agent"
-          $source = Get-Content (Join-Path $home "web\src\pages\ChatPage.tsx") -Raw
+          $hermesProject = Join-Path $env:RUNNER_TEMP "hermes\hermes-agent"
+          $source = Get-Content (Join-Path $hermesProject "web\src\pages\ChatPage.tsx") -Raw
           if (-not $source.Contains('HERME_ANDROID_COMPOSER_V1')) {
             throw "Mobile composer source was not patched"
           }
-          if (-not (Test-Path (Join-Path $home "hermes_cli\web_dist\mobile-composer-v1.marker"))) {
+          if (-not (Test-Path (Join-Path $hermesProject "hermes_cli\web_dist\mobile-composer-v1.marker"))) {
             throw "Patched mobile dashboard was not successfully built"
           }
-          $assets = Get-ChildItem (Join-Path $home "hermes_cli\web_dist\assets") -File -Filter "*ChatPage*.js"
+          $assets = Get-ChildItem (Join-Path $hermesProject "hermes_cli\web_dist\assets") -File -Filter "*ChatPage*.js"
           if (-not $assets) { throw "ChatPage production bundle missing" }
           $found = $false
           foreach ($asset in $assets) {
