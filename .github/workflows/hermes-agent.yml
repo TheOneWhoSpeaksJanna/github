@@ -120,7 +120,7 @@ jobs:
             Write-Host "No rolling Hermes checkpoint release yet; checking completed-run artifacts."
             exit 0
           }
-          $release = $json | ConvertFrom-Json
+          $release = ($json -join "`n") | ConvertFrom-Json
           $latest = $release.assets | Where-Object { $_.name -like "hermes-state-*.enc" } | Sort-Object created_at -Descending | Select-Object -First 1
           if (-not $latest) {
             Write-Host "No rolling Hermes checkpoints yet."
