@@ -59,16 +59,16 @@ def selftest():
         p = Path(tmp) / "hermes-models.txt"
         p.write_text(
             "# comment only\n"
-            "dagbs/qwen2.5-coder-1.5b-instruct-abliterated\n"
+            "qwen2.5-coder:1.5b\n"
             "# qwen3.5:2b\n"
-            "qwen2.5-coder:1.5b\n",
+            "qwen3.5:2b\n",
             encoding="utf-8",
         )
         names = model_names(p)
         assert len(names) == 2
-        assert names[0] == "dagbs/qwen2.5-coder-1.5b-instruct-abliterated"
+        assert names[0] == "qwen2.5-coder:1.5b"
         assert str(manifest_path(Path("X:/models"), names[0])).replace("\\", "/").endswith(
-            "/manifests/registry.ollama.ai/dagbs/qwen2.5-coder-1.5b-instruct-abliterated/latest"
+            "/manifests/registry.ollama.ai/qwen2.5-coder:1.5b/latest"
         )
         assert str(manifest_path(Path("X:/models"), names[1])).replace("\\", "/").endswith(
             "/manifests/registry.ollama.ai/library/qwen2.5-coder/1.5b"
