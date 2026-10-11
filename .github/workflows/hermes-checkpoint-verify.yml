@@ -5,7 +5,7 @@ on:
       - .github/workflows/hermes-checkpoint-verify.yml
 permissions:
   contents: write
-  actions: read
+  actions: write
 jobs:
   checkpoint-smoke:
     runs-on: windows-2022
@@ -48,6 +48,30 @@ jobs:
           $wantHash = (Get-FileHash $encryptedFile -Algorithm SHA256).Hash
           if ($gotHash -ne $wantHash) { throw "Checkpoint upload/download corrupted encrypted ciphertext" }
           Write-Host "PASSED: checkpoint exists on GitHub while job is running, and ciphertext restored byte-for-byte."
+      - name: Test harmless Stop workflow signal and API detection
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          # No agent is running: Stop should complete as a control-only run.
+          & gh workflow run "hermes-agent.yml" --repo $env:GITHUB_REPOSITORY --ref main -f operation=stop -f session_minutes=300
+          if ($LASTEXITCODE -ne 0) { throw "Could not dispatch Stop command" }
+          $found = $false
+          for ($i=0; $i -lt 20; $i++) {
+            Start-Sleep -Seconds 3
+            $json = & gh api "repos/$env:GITHUB_REPOSITORY/actions/workflows/hermes-agent.yml/runs?event=workflow_dispatch&per_page=30"
+            if ($LASTEXITCODE -ne 0) { throw "Could not read Stop signal" }
+            $data = ($json -join "`n") | ConvertFrom-Json
+            $match = @($data.workflow_runs | Where-Object {
+              $_.display_title -eq "Hermes stop" -and
+              [long]$_.id -gt [long]$env:GITHUB_RUN_ID
+            })
+            if ($match.Count -gt 0) { $found = $true; break }
+          }
+          if (-not $found) { throw "Hermes stop signal not visible as expected to the running agent" }
+          Write-Host "PASSED: Stop operation creates a distinct Hermes stop run detectable by the live server."
+
       - name: Remove temporary verification prerelease and tag
         if: always()
         shell: powershell
