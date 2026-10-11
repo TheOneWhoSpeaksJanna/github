@@ -1,14 +1,28 @@
 name: Android Ollama over Tailscale
 on:
   workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/main.yml
 permissions:
   contents: read
+concurrency:
+  group: android-ollama-server
+  cancel-in-progress: true
 jobs:
   ai-vm:
     runs-on: windows-2022
     timeout-minutes: 350
     steps:
       - uses: actions/checkout@v4
+      - name: Verify public runner CPU and memory
+        shell: powershell
+        run: |
+          $logical = [Environment]::ProcessorCount
+          $total = [math]::Round((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB, 2)
+          Write-Host "RUNNER CPUs: $logical; RAM: $total GB"
+          "## Public Actions hardware: $logical logical CPU cores; $total GB RAM" | Out-File -Append -FilePath $env:GITHUB_STEP_SUMMARY
+          if ($logical -lt 4) { Write-Warning "Runner has fewer than the expected four logical CPUs" }
       - name: Install and authenticate Tailscale
         shell: powershell
         env:
@@ -26,8 +40,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Tailscale authentication failed" }
           $ip = (& $ts ip -4 | Select-Object -First 1)
           if (-not $ip -or $ip -notmatch '^100\.') { throw "Missing Tailscale IP" }
+          # Public repository job logs are visible to everyone. Mask tailnet addresses.
+          Write-Host "::add-mask::$ip"
           "TAILSCALE_IP=$ip" >> $env:GITHUB_ENV
-          Write-Host "Tailscale IP: $ip"
+          Write-Host "Connected to private Tailscale network"
 
       - name: Install Ollama in shared directory
         shell: powershell
@@ -63,30 +79,11 @@ jobs:
           if (-not $adapter) { throw "Tailscale adapter missing" }
           New-NetFirewallRule -DisplayName "AI API via Tailscale" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 11434 -InterfaceAlias $adapter.InterfaceAlias -RemoteAddress "100.64.0.0/10" -ErrorAction Stop | Out-Null
 
-          # Apply CPU thread tuning only when the benchmark demonstrated
-          # at least a 10% improvement over the same model's default setting.
-          if (Test-Path "CPU_TUNING.json") {
-            try {
-              $tuning = Get-Content "CPU_TUNING.json" -Raw | ConvertFrom-Json
-              $wanted = "qwen2.5-coder:1.5b"
-              if (Test-Path "selected-model.txt") {
-                $selected = (Get-Content "selected-model.txt" -Raw).Trim()
-                if ($selected -match "3b") { $wanted = "qwen2.5-coder:3b" }
-              }
-              $best = if ($wanted -eq "qwen2.5-coder:3b") { $tuning.best_3b } else { $tuning.best_1_5b }
-              $default = $tuning.rows | Where-Object {
-                $_.model -eq $wanted -and $null -eq $_.threads -and $_.status -eq "OK"
-              } | Select-Object -First 1
-              if ($null -ne $best -and $null -ne $default -and
-                  $null -ne $best.threads -and [int]$best.threads -gt 0 -and
-                  [double]$best.tps -gt 1.10 * [double]$default.tps) {
-                $env:LLAMA_ARG_THREADS = [string]$best.threads
-                Write-Host "Applying measured CPU thread setting: $env:LLAMA_ARG_THREADS"
-              }
-            } catch {
-              Write-Host "CPU tuning config unavailable; continuing with Ollama defaults."
-            }
-          }
+          # Keep CPU threading automatic. Earlier tuning results came from a
+          # different 2-vCPU runner and standard models, not this 4-vCPU VM.
+          # Explicit LLAMA_ARG_THREADS is not a reliable Ollama tuning mechanism.
+          Remove-Item Env:LLAMA_ARG_THREADS -ErrorAction SilentlyContinue
+          Write-Host "Using Ollama's automatic CPU thread selection."
 
           Start-Process -FilePath $ollama -ArgumentList "serve" -WindowStyle Hidden
           $api = "http://$($env:TAILSCALE_IP):11434"
@@ -146,7 +143,8 @@ jobs:
           } catch { Write-Host "Warm-up failed: $($_.Exception.Message)" }
           
           Write-Host "========================================"
-          Write-Host "ANDROID APP SERVER URL: $api"
+          Write-Host "ANDROID APP SERVER: available privately via Tailscale, port 11434"
+          Write-Host "Find this run's Tailscale IP in your Tailscale devices dashboard."
           Write-Host "MODEL: local-coder (based on $model)"
           Write-Host "Ollama executable: C:\Ollama\ollama.exe"
           Write-Host "========================================"
