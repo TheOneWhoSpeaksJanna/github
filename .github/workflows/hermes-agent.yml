@@ -1,16 +1,24 @@
 name: Hermes Agent over Tailscale (Experimental)
 on:
   workflow_dispatch:
+    inputs:
+      session_minutes:
+        description: Session length in minutes, maximum 310
+        required: true
+        type: number
+        default: 300
   push:
     paths:
       - .github/workflows/hermes-agent.yml
-      - scripts/hermes-server.ps1
+
 permissions:
   contents: read
   actions: read
+
 concurrency:
   group: hermes-agent-server
   cancel-in-progress: false
+
 jobs:
   hermes:
     runs-on: windows-2022
@@ -20,40 +28,65 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Check Hermes PowerShell script syntax before startup
+      - name: Verify PowerShell scripts
         shell: powershell
         run: |
-          $file = (Resolve-Path ".\scripts\hermes-server.ps1").Path
-          $data = [IO.File]::ReadAllBytes($file)
-          if (@($data | Where-Object { $_ -gt 127 }).Count -gt 0) {
-            throw "Hermes server PowerShell file contains non-ASCII characters that break Windows PowerShell 5.1"
+          $files = @("scripts\hermes-bootstrap.ps1", "scripts\hermes-fast-server.ps1")
+          foreach ($file in $files) {
+            $data = [IO.File]::ReadAllBytes((Resolve-Path $file).Path)
+            if (@($data | Where-Object { $_ -gt 127 }).Count -gt 0) {
+              throw "PowerShell file has non-ASCII punctuation that Windows PowerShell 5.1 may misparse: $file"
+            }
+            $tok = $null
+            $err = $null
+            $null = [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file).Path, [ref]$tok, [ref]$err)
+            if ($err.Count -gt 0) { throw "PowerShell script syntax invalid: $file" }
           }
-          $tokens = $null
-          $parseErrors = $null
-          $null = [System.Management.Automation.Language.Parser]::ParseFile($file, [ref]$tokens, [ref]$parseErrors)
-          if ($parseErrors.Count -gt 0) {
-            $parseErrors | ForEach-Object { Write-Error $_.Message }
-            throw "PowerShell parsing failed; refusing to start Tailscale or Hermes."
-          }
-          Write-Host "Hermes PowerShell 5.1 script syntax verified."
+          Write-Host "Hermes scripts pass syntax preflight."
 
-      - name: Install snapshot encryption library and self-test
+      - name: Restore cached clean Hermes, Ollama and model
+        id: runtime_cache
+        uses: actions/cache/restore@v4
+        with:
+          key: hermes-windows2022-pinned79b45d-qwen35-2b-v1
+          path: |
+            ${{ runner.temp }}/hermes
+            ${{ runner.temp }}/ollama-bin
+            ${{ runner.temp }}/ollama-models
+
+      - name: Prepare only public binaries and standard model
+        shell: powershell
+        run: |
+          & .\scripts\hermes-bootstrap.ps1
+          if (-not $?) { throw "Hermes clean runtime preparation failed" }
+
+      - name: Cache only clean binaries and model BEFORE any private data
+        if: steps.runtime_cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          key: hermes-windows2022-pinned79b45d-qwen35-2b-v1
+          path: |
+            ${{ runner.temp }}/hermes
+            ${{ runner.temp }}/ollama-bin
+            ${{ runner.temp }}/ollama-models
+
+      - name: Install snapshot encryption and validate restore
         shell: powershell
         run: |
           python -m pip install --disable-pip-version-check cryptography
-          if ($LASTEXITCODE -ne 0) { throw "Cannot install encrypted snapshot dependency" }
+          if ($LASTEXITCODE -ne 0) { throw "Snapshot encryption library failed" }
           python scripts/hermes_persist.py selftest
-          if ($LASTEXITCODE -ne 0) { throw "Encryption self-test failed" }
+          if ($LASTEXITCODE -ne 0) { throw "Encrypted snapshot test failed" }
 
-      - name: Find latest prior encrypted state backup
-        id: backup
+      - name: Locate latest previous encrypted state
+        id: snapshot
         shell: powershell
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference = "Stop"
           $data = gh api "repos/$env:GITHUB_REPOSITORY/actions/artifacts?per_page=100" | ConvertFrom-Json
-          if ($LASTEXITCODE -ne 0) { throw "Cannot list state backups" }
+          if ($LASTEXITCODE -ne 0) { throw "Unable to list backups" }
           $latest = $data.artifacts | Where-Object {
             $_.name -like "hermes-state-*" -and $_.expired -eq $false -and
             $_.workflow_run.head_branch -eq "main" -and
@@ -62,39 +95,28 @@ jobs:
           if ($latest) {
             "name=$($latest.name)" >> $env:GITHUB_OUTPUT
             "run_id=$($latest.workflow_run.id)" >> $env:GITHUB_OUTPUT
-            Write-Host "Located an encrypted Hermes state snapshot from an earlier run."
+            Write-Host "Found encrypted state from an earlier run."
           } else {
-            Write-Host "No earlier Hermes backup exists. Starting with a fresh state."
+            Write-Host "No encrypted Hermes history yet; fresh start."
           }
 
-      - name: Download the encrypted backup
-        if: steps.backup.outputs.name != ''
+      - name: Download encrypted session backup
+        if: steps.snapshot.outputs.name != ''
         uses: actions/download-artifact@v4
         with:
-          name: ${{ steps.backup.outputs.name }}
-          run-id: ${{ steps.backup.outputs.run_id }}
+          name: ${{ steps.snapshot.outputs.name }}
+          run-id: ${{ steps.snapshot.outputs.run_id }}
           github-token: ${{ github.token }}
           path: ${{ runner.temp }}/hermes-restore
 
-      - name: Restore private sessions, memories and workspace
-        if: steps.backup.outputs.name != ''
+      - name: Restore private memory, sessions and work files
+        if: steps.snapshot.outputs.name != ''
         shell: powershell
         env:
           HERMES_DASHBOARD_PASSWORD: ${{ secrets.HERMES_DASHBOARD_PASSWORD }}
         run: |
-          python scripts/hermes_persist.py restore --home "$env:LOCALAPPDATA\hermes" --workspace "$env:RUNNER_TEMP\HermesWorkspace" --file "$env:RUNNER_TEMP\hermes-restore\hermes-state.enc"
-          if ($LASTEXITCODE -ne 0) { throw "Encrypted restore failed: check the secret, do not start an empty replacement state" }
-
-      - name: Restore cached public Hermes code and standard Ollama model
-        id: software_cache
-        uses: actions/cache/restore@v4
-        with:
-          key: hermes-win22-code-79b45d1-ollama-qwen35-2b-v1
-          path: |
-            ~/AppData/Local/hermes/hermes-agent
-            ~/AppData/Local/hermes/bin
-            ~/AppData/Local/Programs/Ollama
-            ${{ runner.temp }}/hermes-models
+          python scripts/hermes_persist.py restore --home "$env:RUNNER_TEMP\hermes" --workspace "$env:RUNNER_TEMP\HermesWorkspace" --file "$env:RUNNER_TEMP\hermes-restore\hermes-state.enc"
+          if ($LASTEXITCODE -ne 0) { throw "Encrypted memory restore failed; backup may use a different password" }
 
       - name: Authenticate private Tailscale connection
         shell: powershell
@@ -103,369 +125,36 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           $ProgressPreference = "SilentlyContinue"
-          if (-not $env:TS_AUTHKEY) { throw "Configure TAILSCALE_AUTHKEY Actions secret first" }
+          if (-not $env:TS_AUTHKEY) { throw "Configure TAILSCALE_AUTHKEY secret" }
           $msi = "$env:TEMP\tailscale.msi"
           Invoke-WebRequest "https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi" -OutFile $msi
-          $result = Start-Process msiexec.exe -ArgumentList @("/i", $msi, "/quiet", "/norestart") -Wait -PassThru
-          if ($result.ExitCode -notin @(0,3010)) { throw "Tailscale installation failed" }
+          $proc = Start-Process msiexec.exe -ArgumentList @("/i", $msi, "/quiet", "/norestart") -Wait -PassThru
+          if ($proc.ExitCode -notin @(0,3010)) { throw "Tailscale installation failed" }
           $ts = "$env:ProgramFiles\Tailscale\tailscale.exe"
           & $ts up --authkey="$env:TS_AUTHKEY" --hostname="hermes-$env:GITHUB_RUN_ID" --unattended
-          if ($LASTEXITCODE -ne 0) { throw "Tailscale authentication failed" }
+          if ($LASTEXITCODE -ne 0) { throw "Tailscale auth failed" }
           $ip = (& $ts ip -4 | Select-Object -First 1)
-          if (-not $ip -or $ip -notmatch '^100\.') { throw "Tailnet IPv4 unavailable" }
+          if (-not $ip -or $ip -notmatch '^100\.') { throw "Tailscale private IP missing" }
           Write-Host "::add-mask::$ip"
           "TAILSCALE_IP=$ip" >> $env:GITHUB_ENV
-          Write-Host "Private Tailscale connection established."
+          Write-Host "Joined private Tailscale network."
 
-      - name: Prepare Hermes and Ollama reusable dependencies
-        id: prepare
+      - name: Run authenticated Hermes dashboard and encrypted backups
+        timeout-minutes: 330
         shell: powershell
         env:
           HERMES_DASHBOARD_PASSWORD: ${{ secrets.HERMES_DASHBOARD_PASSWORD }}
+          HERMES_SESSION_MINUTES: ${{ github.event_name == 'push' && '2' || inputs.session_minutes }}
         run: |
-          & .\scripts\hermes-server.ps1 -PrepareOnly
-          if (-not $?) { throw "Hermes dependency preparation failed" }
+          & .\scripts\hermes-fast-server.ps1
+          if (-not $?) { throw "Hermes dashboard ended with an error" }
 
-      - name: Cache installed public software and standard model
-        if: steps.software_cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          key: hermes-win22-code-79b45d1-ollama-qwen35-2b-v1
-          path: |
-            ~/AppData/Local/hermes/hermes-agent
-            ~/AppData/Local/hermes/bin
-            ~/AppData/Local/Programs/Ollama
-            ${{ runner.temp }}/hermes-models
-
-      - name: Start password-protected Hermes and Ollama
-        id: server
-        shell: powershell
-        env:
-          HERMES_DASHBOARD_PASSWORD: ${{ secrets.HERMES_DASHBOARD_PASSWORD }}
-        run: |
-          & .\scripts\hermes-server.ps1 -StartOnly
-          if (-not $?) { throw "Hermes dashboard failed to start" }
-
-      - name: Keep Hermes available - segment 01 of 7
-        if: success()
-        shell: powershell
-        timeout-minutes: 47
-        run: |
-          $deadline = (Get-Date).AddMinutes(45)
-          while ((Get-Date) -lt $deadline) {
-            Start-Sleep -Seconds 30
-            # Hermes.exe can be a short-lived launcher. Check the actual dashboard API,
-            # including login requirements, instead of tracking the launcher PID.
-            try {
-              $health = Invoke-RestMethod "http://$($env:TAILSCALE_IP):9119/api/status" -TimeoutSec 5
-              if ($health.auth_required -ne $true -or $health.auth_providers -notcontains "basic") {
-                throw "Hermes dashboard authentication health check failed"
-              }
-            } catch {
-              $errorLog = Join-Path $env:RUNNER_TEMP "hermes-dashboard-stderr.log"
-              if (Test-Path $errorLog) { Get-Content $errorLog -Tail 12 }
-              throw "Hermes dashboard is unreachable: $($_.Exception.Message)"
-            }
-            if (-not (Get-Process ollama -ErrorAction SilentlyContinue)) {
-              throw "Ollama unexpectedly stopped."
-            }
-          }
-          Write-Host "Finished Hermes segment 01; saving encrypted session checkpoint."
-
-      - name: Encrypt state checkpoint 01
-        if: success()
-        shell: powershell
-        env:
-          HERMES_DASHBOARD_PASSWORD: ${{ secrets.HERMES_DASHBOARD_PASSWORD }}
-        run: |
-          python scripts/hermes_persist.py save --home "$env:LOCALAPPDATA\hermes" --workspace "$env:RUNNER_TEMP\HermesWorkspace" --file "$env:RUNNER_TEMP\hermes-state.enc"
-          if ($LASTEXITCODE -ne 0) { throw "Failed to encrypt Hermes state; no plaintext archive will be uploaded" }
-
-      - name: Save encrypted checkpoint 01 across VM restarts
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: hermes-state-${{ github.run_id }}-01
-          path: ${{ runner.temp }}/hermes-state.enc
-          compression-level: 0
-          retention-days: 90
-          if-no-files-found: error
-
-      - name: Keep Hermes available - segment 02 of 7
-        if: success()
-        shell: powershell
-        timeout-minutes: 47
-        run: |
-          $deadline = (Get-Date).AddMinutes(45)
-          while ((Get-Date) -lt $deadline) {
-            Start-Sleep -Seconds 30
-            # Hermes.exe can be a short-lived launcher. Check the actual dashboard API,
-            # including login requirements, instead of tracking the launcher PID.
-            try {
-              $health = Invoke-RestMethod "http://$($env:TAILSCALE_IP):9119/api/status" -TimeoutSec 5
-              if ($health.auth_required -ne $true -or $health.auth_providers -notcontains "basic") {
-                throw "Hermes dashboard authentication health check failed"
-              }
-            } catch {
-              $errorLog = Join-Path $env:RUNNER_TEMP "hermes-dashboard-stderr.log"
-              if (Test-Path $errorLog) { Get-Content $errorLog -Tail 12 }
-              throw "Hermes dashboard is unreachable: $($_.Exception.Message)"
-            }
-            if (-not (Get-Process ollama -ErrorAction SilentlyContinue)) {
-              throw "Ollama unexpectedly stopped."
-            }
-          }
-          Write-Host "Finished Hermes segment 02; saving encrypted session checkpoint."
-
-      - name: Encrypt state checkpoint 02
-        if: success()
-        shell: powershell
-        env:
-          HERMES_DASHBOARD_PASSWORD: ${{ secrets.HERMES_DASHBOARD_PASSWORD }}
-        run: |
-          python scripts/hermes_persist.py save --home "$env:LOCALAPPDATA\hermes" --workspace "$env:RUNNER_TEMP\HermesWorkspace" --file "$env:RUNNER_TEMP\hermes-state.enc"
-          if ($LASTEXITCODE -ne 0) { throw "Failed to encrypt Hermes state; no plaintext archive will be uploaded" }
-
-      - name: Save encrypted checkpoint 02 across VM restarts
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: hermes-state-${{ github.run_id }}-02
-          path: ${{ runner.temp }}/hermes-state.enc
-          compression-level: 0
-          retention-days: 90
-          if-no-files-found: error
-
-      - name: Keep Hermes available - segment 03 of 7
-        if: success()
-        shell: powershell
-        timeout-minutes: 47
-        run: |
-          $deadline = (Get-Date).AddMinutes(45)
-          while ((Get-Date) -lt $deadline) {
-            Start-Sleep -Seconds 30
-            # Hermes.exe can be a short-lived launcher. Check the actual dashboard API,
-            # including login requirements, instead of tracking the launcher PID.
-            try {
-              $health = Invoke-RestMethod "http://$($env:TAILSCALE_IP):9119/api/status" -TimeoutSec 5
-              if ($health.auth_required -ne $true -or $health.auth_providers -notcontains "basic") {
-                throw "Hermes dashboard authentication health check failed"
-              }
-            } catch {
-              $errorLog = Join-Path $env:RUNNER_TEMP "hermes-dashboard-stderr.log"
-              if (Test-Path $errorLog) { Get-Content $errorLog -Tail 12 }
-              throw "Hermes dashboard is unreachable: $($_.Exception.Message)"
-            }
-            if (-not (Get-Process ollama -ErrorAction SilentlyContinue)) {
-              throw "Ollama unexpectedly stopped."
-            }
-          }
-          Write-Host "Finished Hermes segment 03; saving encrypted session checkpoint."
-
-      - name: Encrypt state checkpoint 03
-        if: success()
-        shell: powershell
-        env:
-          HERMES_DASHBOARD_PASSWORD: ${{ secrets.HERMES_DASHBOARD_PASSWORD }}
-        run: |
-          python scripts/hermes_persist.py save --home "$env:LOCALAPPDATA\hermes" --workspace "$env:RUNNER_TEMP\HermesWorkspace" --file "$env:RUNNER_TEMP\hermes-state.enc"
-          if ($LASTEXITCODE -ne 0) { throw "Failed to encrypt Hermes state; no plaintext archive will be uploaded" }
-
-      - name: Save encrypted checkpoint 03 across VM restarts
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: hermes-state-${{ github.run_id }}-03
-          path: ${{ runner.temp }}/hermes-state.enc
-          compression-level: 0
-          retention-days: 90
-          if-no-files-found: error
-
-      - name: Keep Hermes available - segment 04 of 7
-        if: success()
-        shell: powershell
-        timeout-minutes: 47
-        run: |
-          $deadline = (Get-Date).AddMinutes(45)
-          while ((Get-Date) -lt $deadline) {
-            Start-Sleep -Seconds 30
-            # Hermes.exe can be a short-lived launcher. Check the actual dashboard API,
-            # including login requirements, instead of tracking the launcher PID.
-            try {
-              $health = Invoke-RestMethod "http://$($env:TAILSCALE_IP):9119/api/status" -TimeoutSec 5
-              if ($health.auth_required -ne $true -or $health.auth_providers -notcontains "basic") {
-                throw "Hermes dashboard authentication health check failed"
-              }
-            } catch {
-              $errorLog = Join-Path $env:RUNNER_TEMP "hermes-dashboard-stderr.log"
-              if (Test-Path $errorLog) { Get-Content $errorLog -Tail 12 }
-              throw "Hermes dashboard is unreachable: $($_.Exception.Message)"
-            }
-            if (-not (Get-Process ollama -ErrorAction SilentlyContinue)) {
-              throw "Ollama unexpectedly stopped."
-            }
-          }
-          Write-Host "Finished Hermes segment 04; saving encrypted session checkpoint."
-
-      - name: Encrypt state checkpoint 04
-        if: success()
-        shell: powershell
-        env:
-          HERMES_DASHBOARD_PASSWORD: ${{ secrets.HERMES_DASHBOARD_PASSWORD }}
-        run: |
-          python scripts/hermes_persist.py save --home "$env:LOCALAPPDATA\hermes" --workspace "$env:RUNNER_TEMP\HermesWorkspace" --file "$env:RUNNER_TEMP\hermes-state.enc"
-          if ($LASTEXITCODE -ne 0) { throw "Failed to encrypt Hermes state; no plaintext archive will be uploaded" }
-
-      - name: Save encrypted checkpoint 04 across VM restarts
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: hermes-state-${{ github.run_id }}-04
-          path: ${{ runner.temp }}/hermes-state.enc
-          compression-level: 0
-          retention-days: 90
-          if-no-files-found: error
-
-      - name: Keep Hermes available - segment 05 of 7
-        if: success()
-        shell: powershell
-        timeout-minutes: 47
-        run: |
-          $deadline = (Get-Date).AddMinutes(45)
-          while ((Get-Date) -lt $deadline) {
-            Start-Sleep -Seconds 30
-            # Hermes.exe can be a short-lived launcher. Check the actual dashboard API,
-            # including login requirements, instead of tracking the launcher PID.
-            try {
-              $health = Invoke-RestMethod "http://$($env:TAILSCALE_IP):9119/api/status" -TimeoutSec 5
-              if ($health.auth_required -ne $true -or $health.auth_providers -notcontains "basic") {
-                throw "Hermes dashboard authentication health check failed"
-              }
-            } catch {
-              $errorLog = Join-Path $env:RUNNER_TEMP "hermes-dashboard-stderr.log"
-              if (Test-Path $errorLog) { Get-Content $errorLog -Tail 12 }
-              throw "Hermes dashboard is unreachable: $($_.Exception.Message)"
-            }
-            if (-not (Get-Process ollama -ErrorAction SilentlyContinue)) {
-              throw "Ollama unexpectedly stopped."
-            }
-          }
-          Write-Host "Finished Hermes segment 05; saving encrypted session checkpoint."
-
-      - name: Encrypt state checkpoint 05
-        if: success()
-        shell: powershell
-        env:
-          HERMES_DASHBOARD_PASSWORD: ${{ secrets.HERMES_DASHBOARD_PASSWORD }}
-        run: |
-          python scripts/hermes_persist.py save --home "$env:LOCALAPPDATA\hermes" --workspace "$env:RUNNER_TEMP\HermesWorkspace" --file "$env:RUNNER_TEMP\hermes-state.enc"
-          if ($LASTEXITCODE -ne 0) { throw "Failed to encrypt Hermes state; no plaintext archive will be uploaded" }
-
-      - name: Save encrypted checkpoint 05 across VM restarts
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: hermes-state-${{ github.run_id }}-05
-          path: ${{ runner.temp }}/hermes-state.enc
-          compression-level: 0
-          retention-days: 90
-          if-no-files-found: error
-
-      - name: Keep Hermes available - segment 06 of 7
-        if: success()
-        shell: powershell
-        timeout-minutes: 47
-        run: |
-          $deadline = (Get-Date).AddMinutes(45)
-          while ((Get-Date) -lt $deadline) {
-            Start-Sleep -Seconds 30
-            # Hermes.exe can be a short-lived launcher. Check the actual dashboard API,
-            # including login requirements, instead of tracking the launcher PID.
-            try {
-              $health = Invoke-RestMethod "http://$($env:TAILSCALE_IP):9119/api/status" -TimeoutSec 5
-              if ($health.auth_required -ne $true -or $health.auth_providers -notcontains "basic") {
-                throw "Hermes dashboard authentication health check failed"
-              }
-            } catch {
-              $errorLog = Join-Path $env:RUNNER_TEMP "hermes-dashboard-stderr.log"
-              if (Test-Path $errorLog) { Get-Content $errorLog -Tail 12 }
-              throw "Hermes dashboard is unreachable: $($_.Exception.Message)"
-            }
-            if (-not (Get-Process ollama -ErrorAction SilentlyContinue)) {
-              throw "Ollama unexpectedly stopped."
-            }
-          }
-          Write-Host "Finished Hermes segment 06; saving encrypted session checkpoint."
-
-      - name: Encrypt state checkpoint 06
-        if: success()
-        shell: powershell
-        env:
-          HERMES_DASHBOARD_PASSWORD: ${{ secrets.HERMES_DASHBOARD_PASSWORD }}
-        run: |
-          python scripts/hermes_persist.py save --home "$env:LOCALAPPDATA\hermes" --workspace "$env:RUNNER_TEMP\HermesWorkspace" --file "$env:RUNNER_TEMP\hermes-state.enc"
-          if ($LASTEXITCODE -ne 0) { throw "Failed to encrypt Hermes state; no plaintext archive will be uploaded" }
-
-      - name: Save encrypted checkpoint 06 across VM restarts
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: hermes-state-${{ github.run_id }}-06
-          path: ${{ runner.temp }}/hermes-state.enc
-          compression-level: 0
-          retention-days: 90
-          if-no-files-found: error
-
-      - name: Keep Hermes available - segment 07 of 7
-        if: success()
-        shell: powershell
-        timeout-minutes: 47
-        run: |
-          $deadline = (Get-Date).AddMinutes(45)
-          while ((Get-Date) -lt $deadline) {
-            Start-Sleep -Seconds 30
-            # Hermes.exe can be a short-lived launcher. Check the actual dashboard API,
-            # including login requirements, instead of tracking the launcher PID.
-            try {
-              $health = Invoke-RestMethod "http://$($env:TAILSCALE_IP):9119/api/status" -TimeoutSec 5
-              if ($health.auth_required -ne $true -or $health.auth_providers -notcontains "basic") {
-                throw "Hermes dashboard authentication health check failed"
-              }
-            } catch {
-              $errorLog = Join-Path $env:RUNNER_TEMP "hermes-dashboard-stderr.log"
-              if (Test-Path $errorLog) { Get-Content $errorLog -Tail 12 }
-              throw "Hermes dashboard is unreachable: $($_.Exception.Message)"
-            }
-            if (-not (Get-Process ollama -ErrorAction SilentlyContinue)) {
-              throw "Ollama unexpectedly stopped."
-            }
-          }
-          Write-Host "Finished Hermes segment 07; saving encrypted session checkpoint."
-
-      - name: Encrypt state checkpoint 07
-        if: success()
-        shell: powershell
-        env:
-          HERMES_DASHBOARD_PASSWORD: ${{ secrets.HERMES_DASHBOARD_PASSWORD }}
-        run: |
-          python scripts/hermes_persist.py save --home "$env:LOCALAPPDATA\hermes" --workspace "$env:RUNNER_TEMP\HermesWorkspace" --file "$env:RUNNER_TEMP\hermes-state.enc"
-          if ($LASTEXITCODE -ne 0) { throw "Failed to encrypt Hermes state; no plaintext archive will be uploaded" }
-
-      - name: Save encrypted checkpoint 07 across VM restarts
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: hermes-state-${{ github.run_id }}-07
-          path: ${{ runner.temp }}/hermes-state.enc
-          compression-level: 0
-          retention-days: 90
-          if-no-files-found: error
-
-      - name: Stop agent after scheduled backup
+      - name: Upload encrypted memory checkpoint after session
         if: always()
-        shell: powershell
-        run: |
-          if ($env:HERMES_DASHBOARD_PID) {
-            Stop-Process -Id ([int]$env:HERMES_DASHBOARD_PID) -Force -ErrorAction SilentlyContinue
-          }
-          Write-Host "Ephemeral GitHub Actions VM is ending. The latest encrypted artifact remains available for a future run."
+        uses: actions/upload-artifact@v4
+        with:
+          name: hermes-state-${{ github.run_id }}
+          path: ${{ runner.temp }}/hermes-state.enc
+          compression-level: 0
+          retention-days: 90
+          if-no-files-found: warn
