@@ -27,7 +27,7 @@ The workflow now uses a **clean software-only cache** for the official Hermes ru
 
 The dashboard and local Ollama backend now run inside **one continuous GitHub Actions step**, preventing step transitions from terminating the app.
 
-Each workflow push uses a short two-minute smoke test. A manually started workflow runs 300 minutes by default; the Run workflow dialog lets you choose the number of minutes (1-310).
+Hermes starts **only when you manually run the workflow**; code commits no longer launch additional experimental servers. The Run workflow dialog defaults to a 300-minute session, and you can choose 1-310 minutes. Two short successful October 11 tests verified dashboard startup and encrypted artifact upload.
 
 ## Running time, limitations and security
 
@@ -36,7 +36,7 @@ Each workflow push uses a short two-minute smoke test. A manually started workfl
 - **Backup limitation:** Snapshots are uploaded only **when the workflow step finishes**, not while it is still serving requests. If GitHub abruptly kills the VM or the job is cancelled, the entire current run's changes may be lost. Earlier uploaded backups remain available. Do not rely on this setup as your only copy of important information. Changing the dashboard password makes old backups unreadable without the original password.
 - The repository is public. Never commit passwords, model API tokens, or Tailscale credentials. Old Git history and Action logs can be viewed publicly, and past RDP passwords should be rotated.
 - The dashboard is bound only to the runner's Tailscale address and requires a separate password, unlike a standard Ollama endpoint. Never publish a tunnel to it.
-- The encrypted backup script has its own automated round-trip test, visible under **Actions → Verify encrypted Hermes persistence**. The compatibility test runs separately under **Actions → Hermes Agent Windows CPU Compatibility Test**. Native Windows support exists in current Hermes releases, but Windows Server 2022 with 4 vCPU has not been guaranteed or fully validated by us yet.
+- Historical dedicated smoke-test workflows were removed to simplify the repository. The main Hermes workflow still runs an encryption self-test before loading private data. The recent two-minute runs verified dashboard startup and encrypted artifact uploads; they did not prove all agent tools work on CPU.
 - Existing selected-model.txt and main.yml are not changed. If Hermes does not start or requires too many resources, your original Android chat continues to work.
 
 Official references: [Hermes Windows installation](https://hermes-agent.nousresearch.com/docs/user-guide/windows-native), [Hermes local Ollama guide](https://hermes-agent.nousresearch.com/docs/guides/local-ollama-setup), and [Hermes dashboard authentication](https://hermes-agent.nousresearch.com/docs/user-guide/features/web-dashboard).
