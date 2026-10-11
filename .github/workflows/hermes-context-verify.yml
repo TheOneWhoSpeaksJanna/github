@@ -96,3 +96,49 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Hermes rejected 65536 Ollama request context" }
           Write-Host "PASSED: Hermes accepted context_length=65536 and ollama_num_ctx=65536."
           if (-not $serve.HasExited) { Stop-Process -Id $serve.Id -Force -ErrorAction SilentlyContinue }
+      - name: Verify real Hermes agent responds with file tools at 65536 context
+        timeout-minutes: 7
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $ProgressPreference = "SilentlyContinue"
+          $env:HERMES_HOME = Join-Path $env:RUNNER_TEMP "hermes"
+          $env:OLLAMA_MODELS = Join-Path $env:RUNNER_TEMP "ollama-models"
+          $env:OLLAMA_HOST = "127.0.0.1:11434"
+          $env:OLLAMA_CONTEXT_LENGTH = "65536"
+          $env:OLLAMA_NUM_PARALLEL = "1"
+          $env:OLLAMA_MAX_LOADED_MODELS = "1"
+          $env:CUDA_VISIBLE_DEVICES = "-1"
+          $env:HIP_VISIBLE_DEVICES = "-1"
+          $env:NO_PROXY = "127.0.0.1,localhost"
+          $ollama = Join-Path $env:RUNNER_TEMP "ollama-bin\ollama.exe"
+          $hermes = Join-Path $env:HERMES_HOME "bin\hermes.exe"
+          $serve = Start-Process -FilePath $ollama -ArgumentList "serve" -WindowStyle Hidden -PassThru -RedirectStandardOutput "$env:RUNNER_TEMP\ollama64-agents.stdout.log" -RedirectStandardError "$env:RUNNER_TEMP\ollama64-agents.stderr.log"
+          for ($i=0; $i -lt 35; $i++) {
+            try {
+              Invoke-RestMethod "http://127.0.0.1:11434/api/tags" -TimeoutSec 3 | Out-Null
+              break
+            } catch {
+              if ($i -eq 34) { throw "Ollama did not start for real Hermes agent test" }
+              Start-Sleep -Seconds 2
+            }
+          }
+          $workspace = Join-Path $env:RUNNER_TEMP "HermesAgentTest"
+          New-Item -ItemType Directory -Force -Path $workspace | Out-Null
+          Push-Location $workspace
+          try {
+            $ErrorActionPreference = "Continue"
+            $answer = & $hermes --oneshot "Reply with only the word OK. Do not use any tools." --toolsets file 2>&1 | Out-String
+            $exitCode = $LASTEXITCODE
+            $ErrorActionPreference = "Stop"
+            $trimmed = $answer.Trim()
+            if ($exitCode -ne 0 -or -not $trimmed -or $trimmed -match "context window|could not start|Traceback|error:") {
+              Write-Host "Hermes one-shot output (first 1000 chars): $($trimmed.Substring(0, [Math]::Min(1000, $trimmed.Length)))"
+              throw "Hermes 65K test with file tools did not produce a valid answer"
+            }
+            Write-Host "PASSED: real Hermes one-shot agent with file tools produced a nonempty answer at configured 65536 context."
+            Write-Host "Answer length: $($trimmed.Length) characters."
+          } finally {
+            Pop-Location
+            if (-not $serve.HasExited) { Stop-Process -Id $serve.Id -Force -ErrorAction SilentlyContinue }
+          }
