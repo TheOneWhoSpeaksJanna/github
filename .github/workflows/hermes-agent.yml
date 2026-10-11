@@ -7,9 +7,6 @@ on:
         required: true
         type: number
         default: 300
-  push:
-    paths:
-      - .github/workflows/hermes-agent.yml
 
 permissions:
   contents: read
@@ -17,7 +14,7 @@ permissions:
 
 concurrency:
   group: hermes-fast-v2
-  # Supersede stale experimental starts when a corrected workflow is pushed.
+  # Allow only one Hermes VM at a time; a new manual run replaces an older session.
   cancel-in-progress: true
 
 jobs:
