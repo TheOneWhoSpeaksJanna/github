@@ -85,6 +85,17 @@ jobs:
           python scripts/hermes_persist.py restore --home "$env:LOCALAPPDATA\hermes" --workspace "$env:RUNNER_TEMP\HermesWorkspace" --file "$env:RUNNER_TEMP\hermes-restore\hermes-state.enc"
           if ($LASTEXITCODE -ne 0) { throw "Encrypted restore failed: check the secret, do not start an empty replacement state" }
 
+      - name: Restore cached public Hermes code and standard Ollama model
+        id: software_cache
+        uses: actions/cache/restore@v4
+        with:
+          key: hermes-win22-code-79b45d1-ollama-qwen35-2b-v1
+          path: |
+            ~/AppData/Local/hermes/hermes-agent
+            ~/AppData/Local/hermes/bin
+            ~/AppData/Local/Programs/Ollama
+            ${{ runner.temp }}/hermes-models
+
       - name: Authenticate private Tailscale connection
         shell: powershell
         env:
@@ -106,14 +117,34 @@ jobs:
           "TAILSCALE_IP=$ip" >> $env:GITHUB_ENV
           Write-Host "Private Tailscale connection established."
 
+      - name: Prepare Hermes and Ollama reusable dependencies
+        id: prepare
+        shell: powershell
+        env:
+          HERMES_DASHBOARD_PASSWORD: ${{ secrets.HERMES_DASHBOARD_PASSWORD }}
+        run: |
+          & .\scripts\hermes-server.ps1 -PrepareOnly
+          if (-not $?) { throw "Hermes dependency preparation failed" }
+
+      - name: Cache installed public software and standard model
+        if: steps.software_cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          key: hermes-win22-code-79b45d1-ollama-qwen35-2b-v1
+          path: |
+            ~/AppData/Local/hermes/hermes-agent
+            ~/AppData/Local/hermes/bin
+            ~/AppData/Local/Programs/Ollama
+            ${{ runner.temp }}/hermes-models
+
       - name: Start password-protected Hermes and Ollama
         id: server
         shell: powershell
         env:
           HERMES_DASHBOARD_PASSWORD: ${{ secrets.HERMES_DASHBOARD_PASSWORD }}
         run: |
-          & .\scripts\hermes-server.ps1
-          if ($LASTEXITCODE -ne 0) { throw "Hermes dashboard failed to start" }
+          & .\scripts\hermes-server.ps1 -StartOnly
+          if (-not $?) { throw "Hermes dashboard failed to start" }
 
       - name: Keep Hermes available - segment 01 of 7
         if: success()
@@ -123,8 +154,17 @@ jobs:
           $deadline = (Get-Date).AddMinutes(45)
           while ((Get-Date) -lt $deadline) {
             Start-Sleep -Seconds 30
-            if (-not (Get-Process -Id ([int]$env:HERMES_DASHBOARD_PID) -ErrorAction SilentlyContinue)) {
-              throw "Hermes process unexpectedly stopped; restore from latest encrypted checkpoint."
+            # Hermes.exe can be a short-lived launcher. Check the actual dashboard API,
+            # including login requirements, instead of tracking the launcher PID.
+            try {
+              $health = Invoke-RestMethod "http://$($env:TAILSCALE_IP):9119/api/status" -TimeoutSec 5
+              if ($health.auth_required -ne $true -or $health.auth_providers -notcontains "basic") {
+                throw "Hermes dashboard authentication health check failed"
+              }
+            } catch {
+              $errorLog = Join-Path $env:RUNNER_TEMP "hermes-dashboard-stderr.log"
+              if (Test-Path $errorLog) { Get-Content $errorLog -Tail 12 }
+              throw "Hermes dashboard is unreachable: $($_.Exception.Message)"
             }
             if (-not (Get-Process ollama -ErrorAction SilentlyContinue)) {
               throw "Ollama unexpectedly stopped."
@@ -159,8 +199,17 @@ jobs:
           $deadline = (Get-Date).AddMinutes(45)
           while ((Get-Date) -lt $deadline) {
             Start-Sleep -Seconds 30
-            if (-not (Get-Process -Id ([int]$env:HERMES_DASHBOARD_PID) -ErrorAction SilentlyContinue)) {
-              throw "Hermes process unexpectedly stopped; restore from latest encrypted checkpoint."
+            # Hermes.exe can be a short-lived launcher. Check the actual dashboard API,
+            # including login requirements, instead of tracking the launcher PID.
+            try {
+              $health = Invoke-RestMethod "http://$($env:TAILSCALE_IP):9119/api/status" -TimeoutSec 5
+              if ($health.auth_required -ne $true -or $health.auth_providers -notcontains "basic") {
+                throw "Hermes dashboard authentication health check failed"
+              }
+            } catch {
+              $errorLog = Join-Path $env:RUNNER_TEMP "hermes-dashboard-stderr.log"
+              if (Test-Path $errorLog) { Get-Content $errorLog -Tail 12 }
+              throw "Hermes dashboard is unreachable: $($_.Exception.Message)"
             }
             if (-not (Get-Process ollama -ErrorAction SilentlyContinue)) {
               throw "Ollama unexpectedly stopped."
@@ -195,8 +244,17 @@ jobs:
           $deadline = (Get-Date).AddMinutes(45)
           while ((Get-Date) -lt $deadline) {
             Start-Sleep -Seconds 30
-            if (-not (Get-Process -Id ([int]$env:HERMES_DASHBOARD_PID) -ErrorAction SilentlyContinue)) {
-              throw "Hermes process unexpectedly stopped; restore from latest encrypted checkpoint."
+            # Hermes.exe can be a short-lived launcher. Check the actual dashboard API,
+            # including login requirements, instead of tracking the launcher PID.
+            try {
+              $health = Invoke-RestMethod "http://$($env:TAILSCALE_IP):9119/api/status" -TimeoutSec 5
+              if ($health.auth_required -ne $true -or $health.auth_providers -notcontains "basic") {
+                throw "Hermes dashboard authentication health check failed"
+              }
+            } catch {
+              $errorLog = Join-Path $env:RUNNER_TEMP "hermes-dashboard-stderr.log"
+              if (Test-Path $errorLog) { Get-Content $errorLog -Tail 12 }
+              throw "Hermes dashboard is unreachable: $($_.Exception.Message)"
             }
             if (-not (Get-Process ollama -ErrorAction SilentlyContinue)) {
               throw "Ollama unexpectedly stopped."
@@ -231,8 +289,17 @@ jobs:
           $deadline = (Get-Date).AddMinutes(45)
           while ((Get-Date) -lt $deadline) {
             Start-Sleep -Seconds 30
-            if (-not (Get-Process -Id ([int]$env:HERMES_DASHBOARD_PID) -ErrorAction SilentlyContinue)) {
-              throw "Hermes process unexpectedly stopped; restore from latest encrypted checkpoint."
+            # Hermes.exe can be a short-lived launcher. Check the actual dashboard API,
+            # including login requirements, instead of tracking the launcher PID.
+            try {
+              $health = Invoke-RestMethod "http://$($env:TAILSCALE_IP):9119/api/status" -TimeoutSec 5
+              if ($health.auth_required -ne $true -or $health.auth_providers -notcontains "basic") {
+                throw "Hermes dashboard authentication health check failed"
+              }
+            } catch {
+              $errorLog = Join-Path $env:RUNNER_TEMP "hermes-dashboard-stderr.log"
+              if (Test-Path $errorLog) { Get-Content $errorLog -Tail 12 }
+              throw "Hermes dashboard is unreachable: $($_.Exception.Message)"
             }
             if (-not (Get-Process ollama -ErrorAction SilentlyContinue)) {
               throw "Ollama unexpectedly stopped."
@@ -267,8 +334,17 @@ jobs:
           $deadline = (Get-Date).AddMinutes(45)
           while ((Get-Date) -lt $deadline) {
             Start-Sleep -Seconds 30
-            if (-not (Get-Process -Id ([int]$env:HERMES_DASHBOARD_PID) -ErrorAction SilentlyContinue)) {
-              throw "Hermes process unexpectedly stopped; restore from latest encrypted checkpoint."
+            # Hermes.exe can be a short-lived launcher. Check the actual dashboard API,
+            # including login requirements, instead of tracking the launcher PID.
+            try {
+              $health = Invoke-RestMethod "http://$($env:TAILSCALE_IP):9119/api/status" -TimeoutSec 5
+              if ($health.auth_required -ne $true -or $health.auth_providers -notcontains "basic") {
+                throw "Hermes dashboard authentication health check failed"
+              }
+            } catch {
+              $errorLog = Join-Path $env:RUNNER_TEMP "hermes-dashboard-stderr.log"
+              if (Test-Path $errorLog) { Get-Content $errorLog -Tail 12 }
+              throw "Hermes dashboard is unreachable: $($_.Exception.Message)"
             }
             if (-not (Get-Process ollama -ErrorAction SilentlyContinue)) {
               throw "Ollama unexpectedly stopped."
@@ -303,8 +379,17 @@ jobs:
           $deadline = (Get-Date).AddMinutes(45)
           while ((Get-Date) -lt $deadline) {
             Start-Sleep -Seconds 30
-            if (-not (Get-Process -Id ([int]$env:HERMES_DASHBOARD_PID) -ErrorAction SilentlyContinue)) {
-              throw "Hermes process unexpectedly stopped; restore from latest encrypted checkpoint."
+            # Hermes.exe can be a short-lived launcher. Check the actual dashboard API,
+            # including login requirements, instead of tracking the launcher PID.
+            try {
+              $health = Invoke-RestMethod "http://$($env:TAILSCALE_IP):9119/api/status" -TimeoutSec 5
+              if ($health.auth_required -ne $true -or $health.auth_providers -notcontains "basic") {
+                throw "Hermes dashboard authentication health check failed"
+              }
+            } catch {
+              $errorLog = Join-Path $env:RUNNER_TEMP "hermes-dashboard-stderr.log"
+              if (Test-Path $errorLog) { Get-Content $errorLog -Tail 12 }
+              throw "Hermes dashboard is unreachable: $($_.Exception.Message)"
             }
             if (-not (Get-Process ollama -ErrorAction SilentlyContinue)) {
               throw "Ollama unexpectedly stopped."
@@ -339,8 +424,17 @@ jobs:
           $deadline = (Get-Date).AddMinutes(45)
           while ((Get-Date) -lt $deadline) {
             Start-Sleep -Seconds 30
-            if (-not (Get-Process -Id ([int]$env:HERMES_DASHBOARD_PID) -ErrorAction SilentlyContinue)) {
-              throw "Hermes process unexpectedly stopped; restore from latest encrypted checkpoint."
+            # Hermes.exe can be a short-lived launcher. Check the actual dashboard API,
+            # including login requirements, instead of tracking the launcher PID.
+            try {
+              $health = Invoke-RestMethod "http://$($env:TAILSCALE_IP):9119/api/status" -TimeoutSec 5
+              if ($health.auth_required -ne $true -or $health.auth_providers -notcontains "basic") {
+                throw "Hermes dashboard authentication health check failed"
+              }
+            } catch {
+              $errorLog = Join-Path $env:RUNNER_TEMP "hermes-dashboard-stderr.log"
+              if (Test-Path $errorLog) { Get-Content $errorLog -Tail 12 }
+              throw "Hermes dashboard is unreachable: $($_.Exception.Message)"
             }
             if (-not (Get-Process ollama -ErrorAction SilentlyContinue)) {
               throw "Ollama unexpectedly stopped."
