@@ -112,6 +112,14 @@ Write-Host "HERMES DASHBOARD STARTED - model $activeModel, Tailscale port 9119, 
 "Private dashboard: find hermes-$env:GITHUB_RUN_ID in Tailscale, use port 9119 and username owner. Never expose this service publicly." | Out-File -Append -FilePath $env:GITHUB_STEP_SUMMARY
 "Encrypted state: remotely checkpointed at startup, every 10 minutes, and after a graceful Stop." | Out-File -Append -FilePath $env:GITHUB_STEP_SUMMARY
 "To stop safely: Actions > Hermes Agent > Run workflow > operation = stop. Do NOT press Cancel on this running job." | Out-File -Append -FilePath $env:GITHUB_STEP_SUMMARY
+$healthPath = Join-Path $env:RUNNER_TEMP "hermes-health.jsonl"
+$healthScript = Join-Path $env:GITHUB_WORKSPACE "scripts\hermes-health.ps1"
+try {
+  & $healthScript -Destination $healthPath
+} catch {
+  Write-Warning "Initial private VM metrics were unavailable."
+}
+
 
 # An encrypted snapshot saved only on the VM is NOT durable. Upload one at
 # startup, every 10 minutes, and at shutdown to a rolling GitHub prerelease.
@@ -161,6 +169,7 @@ if ($sessionMinutes -lt 1 -or $sessionMinutes -gt 310) { throw "Invalid session 
 $deadline = (Get-Date).AddMinutes($sessionMinutes)
 $nextSave = (Get-Date).AddMinutes(10)
 $nextControlPoll = (Get-Date).AddSeconds(30)
+$nextHealth = (Get-Date).AddMinutes(2)
 $unhealthy = 0
 try {
   while ((Get-Date) -lt $deadline) {
@@ -179,6 +188,14 @@ try {
         if (Test-Path $err) { Get-Content $err -Tail 20 }
         throw "Hermes dashboard stopped responding"
       }
+    }
+    if ((Get-Date) -ge $nextHealth) {
+      try {
+        & $healthScript -Destination $healthPath
+      } catch {
+        Write-Warning "Non-critical CPU/RAM telemetry unavailable."
+      }
+      $nextHealth = (Get-Date).AddMinutes(2)
     }
     if ((Get-Date) -ge $nextSave) {
       try {
@@ -211,6 +228,7 @@ try {
     Write-Warning "Final remote checkpoint failed; end-of-run Actions artifact upload will still be attempted."
     try { Save-EncryptedState } catch { Write-Warning "Final local checkpoint failed." }
   }
+  try { & $healthScript -Destination $healthPath } catch { }
   if (-not $dashboard.HasExited) { Stop-Process -Id $dashboard.Id -Force -ErrorAction SilentlyContinue }
   if (-not $ollamaProc.HasExited) { Stop-Process -Id $ollamaProc.Id -Force -ErrorAction SilentlyContinue }
   Write-Host "Hermes stopped gracefully. Final encrypted artifact can now upload."
