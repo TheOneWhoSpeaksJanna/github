@@ -12,14 +12,14 @@ on:
           - stop
         default: start
       agent_mode:
-        description: "Tools: chat=fast conversations, light=file tools, full=all (slow on CPU)"
+        description: "chat=fast questions (no tools), light=file tools, full=all tools (slow)"
         required: true
         type: choice
         options:
-          - light
           - chat
+          - light
           - full
-        default: light
+        default: chat
       session_minutes:
         description: Session length in minutes, maximum 310
         required: true
