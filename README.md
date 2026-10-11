@@ -17,6 +17,10 @@ This GitHub repository is public. Workflow source, commit history, job logs, rep
 5. In the Tailscale admin/devices dashboard, locate the device named ollama-<GitHub-run-ID> and its 100.x.x.x address. The address is masked in public Actions logs.
 6. Use http://<100.x.x.x>:11434 as the Ollama base URL in your Android app. Choose local-coder once the workflow loads the model.
 
+## Optional Hermes Agent (experimental)
+
+Hermes is a separate tool-using agent, not merely another Ollama model alias. Your original Ollama Android chat server stays available as-is. See [Hermes Agent Setup](HERMES_AGENT_SETUP.md) for the optional workflow, private password-protected browser dashboard, and Tailscale connection details. It requires the additional HERMES_DASHBOARD_PASSWORD Actions secret and runs a standard tool-capable model in a separate GitHub job. Its compatibility test is tracked under the Actions tab.
+
 ## Benchmarks
 Open Actions > Public 4-vCPU Model Speed Test > Run workflow. It compares official Qwen2.5 Coder 1.5B and 3B across auto/1/2/4 CPU thread configurations. The Actions run has a summary and a downloadable public-runner-cpu-results artifact. Actual performance varies among runners.
 
