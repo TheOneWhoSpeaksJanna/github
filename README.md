@@ -19,7 +19,7 @@ This GitHub repository is public. Workflow source, commit history, job logs, rep
 
 ## Optional Hermes Agent (experimental)
 
-Hermes is a separate tool-using agent, not merely another Ollama model alias. Your original Ollama Android chat server stays available as-is. Its default model is selected from [hermes-models.txt](hermes-models.txt), separate from your original chat setup. The default standard model is `qwen2.5-coder:1.5b`, with 8,192-token context to reduce CPU load. See [Hermes Agent Setup](HERMES_AGENT_SETUP.md) for the optional workflow, password-protected browser dashboard and Tailscale connection details.
+Hermes is a separate tool-using agent, not merely another Ollama model alias. Your original Ollama Android chat server stays available as-is. Its default model is selected from [hermes-models.txt](hermes-models.txt), separate from your original chat setup. The model is chosen by the first uncommented line of `hermes-models.txt`. Hermes requires a 65,536-token Ollama request context for tool use; small or 32K-native models may become slow or unreliable at that setting. See [Hermes Agent Setup](HERMES_AGENT_SETUP.md) for the optional workflow, password-protected browser dashboard and Tailscale connection details.
 
 The optional Hermes workflow caches **only clean, publicly available program files and standard model weights**, before any secrets or conversations are loaded. On a cache hit it can skip the slow Windows, Ollama and Hermes installation. The first run, or one after GitHub evicts the cache, still needs a full setup.
 
