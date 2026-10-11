@@ -101,5 +101,5 @@ Write-Host "Open in an Android browser on your authorized Tailnet device."
 Write-Host "Login username: owner. Password: the private repository Actions secret."
 "## Hermes Agent" | Out-File -Append -FilePath $env:GITHUB_STEP_SUMMARY
 "Authenticated Hermes dashboard running. Find hermes-$env:GITHUB_RUN_ID in Tailscale; use port 9119 and username owner." | Out-File -Append -FilePath $env:GITHUB_STEP_SUMMARY
-while (-not $dashboard.HasExited) { Start-Sleep -Seconds 30 }
-throw "Hermes dashboard stopped"
+"HERMES_DASHBOARD_PID=$($dashboard.Id)" >> $env:GITHUB_ENV
+Write-Host "Hermes dashboard ready; it stays running during the workflow's backup checkpoints."
