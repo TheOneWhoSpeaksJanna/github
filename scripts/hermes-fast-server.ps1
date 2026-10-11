@@ -79,6 +79,13 @@ foreach ($entry in $config) {
   & $hermes config set $entry[0] $entry[1]
   if ($LASTEXITCODE -ne 0) { throw "Hermes configuration failed at $($entry[0])" }
 }
+# Tool schemas dominate prompt prefilling on 4-vCPU runners. Restore memory,
+# but prefer a small explicit tool list unless the user opts into full mode.
+$agentMode = "light"
+if ($env:HERMES_AGENT_MODE) { $agentMode = $env:HERMES_AGENT_MODE.Trim().ToLowerInvariant() }
+& (Join-Path $env:GITHUB_WORKSPACE "scripts\hermes-mode-config.ps1") -HermesExe $hermes -Mode $agentMode
+if (-not $?) { throw "Hermes agent tool mode could not be applied" }
+
 $env:HERMES_DASHBOARD_BASIC_AUTH_USERNAME = "owner"
 $env:HERMES_DASHBOARD_BASIC_AUTH_PASSWORD = $env:HERMES_DASHBOARD_PASSWORD
 $secretBytes = New-Object byte[] 48
@@ -111,6 +118,7 @@ Write-Host "HERMES DASHBOARD STARTED - model $activeModel, Tailscale port 9119, 
 "## Hermes Agent" | Out-File -Append -FilePath $env:GITHUB_STEP_SUMMARY
 "Private dashboard: find hermes-$env:GITHUB_RUN_ID in Tailscale, use port 9119 and username owner. Never expose this service publicly." | Out-File -Append -FilePath $env:GITHUB_STEP_SUMMARY
 "Encrypted state: remotely checkpointed at startup, every 10 minutes, and after a graceful Stop." | Out-File -Append -FilePath $env:GITHUB_STEP_SUMMARY
+"Tool mode: $agentMode (chat=zero tools; light=file only; full=all default tools)." | Out-File -Append -FilePath $env:GITHUB_STEP_SUMMARY
 "To stop safely: Actions > Hermes Agent > Run workflow > operation = stop. Do NOT press Cancel on this running job." | Out-File -Append -FilePath $env:GITHUB_STEP_SUMMARY
 $healthPath = Join-Path $env:RUNNER_TEMP "hermes-health.jsonl"
 $healthScript = Join-Path $env:GITHUB_WORKSPACE "scripts\hermes-health.ps1"
