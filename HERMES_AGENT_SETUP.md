@@ -1,6 +1,6 @@
 # Hermes Agent (experimental) on GitHub Actions
 
-Our existing Android Ollama chat remains unchanged. Hermes Agent is a **separate tool-using application**; merely installing it will not turn an Ollama-only Android client into an agent. The standalone agent workflow runs a standard tool-capable Qwen3.5 2B model and a password-protected Hermes dashboard.
+Our existing Android Ollama chat remains unchanged. Hermes Agent is a **separate tool-using application**; merely installing it will not turn an Ollama-only Android client into an agent. The standalone agent workflow starts the model chosen in the editable [hermes-models.txt](hermes-models.txt) file and a password-protected Hermes dashboard.
 
 ## First-time setup
 
@@ -13,6 +13,17 @@ Our existing Android Ollama chat remains unchanged. Hermes Agent is a **separate
 
 Hermes Agent has a browser dashboard, but an Ollama-only Android app still talks to the old model server on port 11434 and won't be able to invoke Hermes tools. The Hermes dashboard is the separate agent interface.
 
+## Change Hermes Ollama models without editing code
+
+The **only file you need to edit is [hermes-models.txt](hermes-models.txt)** (this is separate from `selected-model.txt`, which controls the original Android Ollama server). From your phone, open the file on GitHub, select the pencil icon, edit, and **Commit changes** to the `main` branch.
+
+- Put **one Ollama model name per uncommented line**. The first model is the Hermes default; any additional model names are downloaded too, up to four total.
+- Lines starting with `#` are comments and not installed.
+- By default, the file chooses standard `qwen2.5-coder:1.5b` for lower CPU usage. For example, you can switch the default to `qwen3.5:2b` by making it the first uncommented line.
+- Changes apply **only on the next manual Hermes workflow run**. Do not cancel a working session just to change model files; abrupt cancellation can lose the current session's local history before upload.
+- A changed list gets a separate reusable cache. Already downloaded models are reused when possible; new models may require extra download time and disk/RAM. The workflow refuses more than four models to avoid unbounded downloads.
+- The default Hermes/Ollama context has been reduced to **8,192 tokens** for lower CPU overhead. A small coding model might struggle with complex multi-tool agent tasks; the workflow can select a model but cannot guarantee it will handle all Hermes tools reliably.
+
 ## Android keyboard support
 
 Hermes's built-in terminal relies on xterm.js, which sometimes ignores mobile keyboard input even when text paste works. The Windows GitHub workflow now builds a small **native Android message composer** into the dashboard Chat tab. After starting a **new** Hermes run with the updated code, you should see **Type a message here...** and **Send** beneath the terminal on your phone. Type in that box and press Send. The message is forwarded via the original authenticated xterm paste/PTY connection, followed by Enter; no public API, second port, or separate password is introduced.
@@ -24,11 +35,11 @@ Hermes's built-in terminal relies on xterm.js, which sometimes ignores mobile ke
 
 Hermes supplies real tool orchestration, such as inspecting files, working on code in a temporary workspace, and other enabled tools. Terminal command approvals are configured as **manual** and unattended dangerous commands are denied. Actions executed by an agent should still be reviewed. The model might call tools incorrectly; an ordinary 2B model will not perform as reliably as a larger model.
 
-The agent uses an **unmodified standard Qwen3.5 2B** model with **65,536-token context**. Large prompts and tool schemas can make response time much slower than the earlier 30-tokens/second chat experience. Hermes's local model requirements and context size are more demanding than Ollama chat.
+Hermes now reads its model from `hermes-models.txt` and uses an **8,192-token default context**. Tool schemas and larger conversations can still slow down CPU inference, even when the same model is fast in a plain Ollama chat.
 
 ## Faster startup and secure software caching
 
-The workflow now uses a **clean software-only cache** for the official Hermes runtime, Ollama program files and standard Qwen3.5 2B model. On a cache hit it skips the Windows Ollama installer, model download, and Hermes dependency/frontend build. The first successful cache-building run still needs the full installation. GitHub caches can be evicted or expire, making a later installation slower again.
+The workflow uses a **clean software-only cache** for the official Hermes runtime, Ollama program files and models listed in `hermes-models.txt`. The cache key changes when the model list changes. On a cache hit it skips the Windows Ollama installer, model download, and Hermes dependency/frontend build. The first successful cache-building run still needs the full installation. GitHub caches can be evicted or expire, making a later installation slower again.
 
 **Important:** The cache is saved before loading Tailscale credentials, dashboard passwords, or restored user conversations. Only public application binaries and model files are stored there. Private memory and chat history are restored separately from an encrypted backup, after the software cache has been saved.
 
