@@ -4,6 +4,12 @@ $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 if (-not $env:TAILSCALE_IP -or $env:TAILSCALE_IP -notmatch '^100\.') { throw "Tailscale address missing" }
 if (-not $env:HERMES_DASHBOARD_PASSWORD -or $env:HERMES_DASHBOARD_PASSWORD.Length -lt 14) { throw "HERMES_DASHBOARD_PASSWORD must be 14+ characters" }
+# The GitHub token is needed only for encrypted checkpoint uploads and to
+# observe Stop requests. Do not inherit it into the Hermes agent child process.
+if (-not $env:GH_TOKEN) { throw "Github token is needed for safe checkpoints" }
+$checkpointGithubToken = $env:GH_TOKEN
+Remove-Item Env:GH_TOKEN
+
 
 $env:HERMES_HOME = Join-Path $env:RUNNER_TEMP "hermes"
 $env:OLLAMA_MODELS = Join-Path $env:RUNNER_TEMP "ollama-models"
@@ -101,19 +107,54 @@ Write-Host "HERMES DASHBOARD STARTED - model $activeModel, Tailscale port 9119, 
 "## Hermes Agent" | Out-File -Append -FilePath $env:GITHUB_STEP_SUMMARY
 "Private dashboard: find hermes-$env:GITHUB_RUN_ID in Tailscale, use port 9119 and username owner. Never expose this service publicly." | Out-File -Append -FilePath $env:GITHUB_STEP_SUMMARY
 
+# An encrypted snapshot saved only on the VM is NOT durable. Upload one at
+# startup, every 10 minutes, and at shutdown to a rolling GitHub prerelease.
+# Every upload uses a new immutable encrypted filename; only encrypted bytes
+# are retained, and old rolling checkpoints are pruned.
 $backup = Join-Path $env:RUNNER_TEMP "hermes-state.enc"
 $backupScript = Join-Path $env:GITHUB_WORKSPACE "scripts\hermes_persist.py"
+$checkpointScript = Join-Path $env:GITHUB_WORKSPACE "scripts\hermes-checkpoint.ps1"
 function Save-EncryptedState {
   & python $backupScript save --home $env:HERMES_HOME --workspace $workdir --file $backup
   if ($LASTEXITCODE -ne 0) { throw "Encrypted state checkpoint failed" }
 }
-# Even a short smoke test should upload a valid encrypted snapshot.
-Save-EncryptedState
+function Upload-EncryptedState {
+  Save-EncryptedState
+  $env:GH_TOKEN = $checkpointGithubToken
+  try {
+    & $checkpointScript -EncryptedFile $backup -Repository $env:GITHUB_REPOSITORY -RunId $env:GITHUB_RUN_ID
+    if (-not $?) { throw "Could not upload encrypted backup to GitHub" }
+  } finally {
+    Remove-Item Env:GH_TOKEN -ErrorAction SilentlyContinue
+  }
+}
+function Stop-Requested {
+  # A separate manual workflow_dispatch run named "Hermes stop" serves as
+  # a durable signal. A Stop run is NOT in the long-running job concurrency
+  # group and thus never abruptly cancels the server.
+  $env:GH_TOKEN = $checkpointGithubToken
+  try {
+    $json = & gh api "repos/$env:GITHUB_REPOSITORY/actions/workflows/hermes-agent.yml/runs?event=workflow_dispatch&per_page=60"
+    if ($LASTEXITCODE -ne 0) { throw "Could not poll workflow control requests" }
+    $data = $json | ConvertFrom-Json
+    $match = @($data.workflow_runs | Where-Object {
+      [long]$_.id -gt [long]$env:GITHUB_RUN_ID -and
+      $_.display_title -eq "Hermes stop" -and
+      $_.head_branch -eq "main"
+    })
+    return ($match.Count -gt 0)
+  } finally {
+    Remove-Item Env:GH_TOKEN -ErrorAction SilentlyContinue
+  }
+}
+Write-Host "Creating the first encrypted off-VM checkpoint."
+Upload-EncryptedState
 $sessionMinutes = 300
 if ($env:HERMES_SESSION_MINUTES) { $sessionMinutes = [int]$env:HERMES_SESSION_MINUTES }
 if ($sessionMinutes -lt 1 -or $sessionMinutes -gt 310) { throw "Invalid session minutes" }
 $deadline = (Get-Date).AddMinutes($sessionMinutes)
-$nextSave = (Get-Date).AddMinutes(15)
+$nextSave = (Get-Date).AddMinutes(10)
+$nextControlPoll = (Get-Date).AddSeconds(30)
 $unhealthy = 0
 try {
   while ((Get-Date) -lt $deadline) {
@@ -134,15 +175,37 @@ try {
       }
     }
     if ((Get-Date) -ge $nextSave) {
-      Save-EncryptedState
-      $nextSave = (Get-Date).AddMinutes(15)
-      Write-Host "Encrypted local checkpoint refreshed."
+      try {
+        Upload-EncryptedState
+        $nextSave = (Get-Date).AddMinutes(10)
+        Write-Host "10-minute encrypted checkpoint saved remotely on GitHub."
+      } catch {
+        Write-Warning "Remote backup failed, retrying in 1 minute: $($_.Exception.Message)"
+        $nextSave = (Get-Date).AddMinutes(1)
+      }
+    }
+    if ((Get-Date) -ge $nextControlPoll) {
+      try {
+        if (Stop-Requested) {
+          Write-Host "Graceful Stop requested from GitHub Actions. Finishing safely."
+          break
+        }
+      } catch {
+        Write-Warning "Could not check for Stop request: $($_.Exception.Message)"
+      }
+      $nextControlPoll = (Get-Date).AddSeconds(45)
     }
   }
-  Write-Host "Hermes session completed as scheduled."
+  Write-Host "Hermes session finished normally."
 } finally {
-  try { Save-EncryptedState } catch { Write-Warning "Final encrypted save failed." }
+  try {
+    Upload-EncryptedState
+    Write-Host "Final encrypted state uploaded to the rolling GitHub backup release."
+  } catch {
+    Write-Warning "Final remote checkpoint failed; end-of-run Actions artifact upload will still be attempted."
+    try { Save-EncryptedState } catch { Write-Warning "Final local checkpoint failed." }
+  }
   if (-not $dashboard.HasExited) { Stop-Process -Id $dashboard.Id -Force -ErrorAction SilentlyContinue }
   if (-not $ollamaProc.HasExited) { Stop-Process -Id $ollamaProc.Id -Force -ErrorAction SilentlyContinue }
-  Write-Host "Encrypted snapshot can now be uploaded from this job."
+  Write-Host "Hermes stopped gracefully. Final encrypted artifact can now upload."
 }
