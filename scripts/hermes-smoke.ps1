@@ -1,7 +1,7 @@
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 $env:OLLAMA_HOST = "127.0.0.1:11434"
-$env:OLLAMA_CONTEXT_LENGTH = "16384"
+$env:OLLAMA_CONTEXT_LENGTH = "65536"
 $env:OLLAMA_NUM_PARALLEL = "1"
 $env:OLLAMA_MAX_LOADED_MODELS = "1"
 $env:CUDA_VISIBLE_DEVICES = "-1"
@@ -29,12 +29,12 @@ for ($i=0; $i -lt 90; $i++) {
   } catch { Start-Sleep -Seconds 2 }
 }
 if (-not $ready) { throw "Ollama server failed readiness check" }
-& $ollama pull qwen2.5-coder:3b
+& $ollama pull qwen3.5:2b
 if ($LASTEXITCODE -ne 0) { throw "Unable to pull the tool-capable standard 3B model" }
 Write-Host "Ollama model ready."
 
 # Validate that the model endpoint exists before introducing another component.
-$body = @{model="qwen2.5-coder:3b";messages=@(@{role="user";content="Say HELLO"});stream=$false;options=@{num_ctx=16384;num_predict=30}} | ConvertTo-Json -Depth 6
+$body = @{model="qwen3.5:2b";messages=@(@{role="user";content="Say HELLO"});stream=$false;think=$false;options=@{num_ctx=65536;num_predict=30}} | ConvertTo-Json -Depth 6
 $r = Invoke-RestMethod -Uri "http://127.0.0.1:11434/api/chat" -Method Post -ContentType "application/json" -Body $body -TimeoutSec 240
 if (-not $r.message.content) { throw "Ollama did not return chat content" }
 Write-Host "Ollama chat API responded."
@@ -48,13 +48,13 @@ if (-not (Test-Path $hermes)) { throw "Hermes launcher missing at $hermes" }
 & $hermes --version
 if ($LASTEXITCODE -ne 0) { throw "Hermes version command failed" }
 
-& $hermes config set model.default "qwen2.5-coder:3b"
+& $hermes config set model.default "qwen3.5:2b"
 if ($LASTEXITCODE -ne 0) { throw "Hermes model.default config failed" }
 & $hermes config set model.provider custom
 if ($LASTEXITCODE -ne 0) { throw "Hermes provider config failed" }
 & $hermes config set model.base_url "http://127.0.0.1:11434/v1"
 if ($LASTEXITCODE -ne 0) { throw "Hermes base URL config failed" }
-& $hermes config set model.context_length 16384
+& $hermes config set model.context_length 65536
 if ($LASTEXITCODE -ne 0) { Write-Warning "Context override may not be supported." }
 
 # Non-interactive, bounded, read-only task. Hermes may need more RAM/context
@@ -67,7 +67,8 @@ try {
   Write-Host "Starting bounded Hermes agent smoke test..."
   $outputFile = Join-Path $logDir "agent-output.txt"
   $started = Get-Date
-  $proc = Start-Process -FilePath $hermes -ArgumentList @("chat","--oneshot","--max-turns","3","-q","Read note.txt in the current folder using a file/terminal tool and tell me its exact contents.") -WorkingDirectory $work -PassThru -RedirectStandardOutput $outputFile -RedirectStandardError (Join-Path $logDir "agent-errors.txt") -WindowStyle Hidden
+  $hermesArgs = 'chat --oneshot --max-turns 3 -q "Read note.txt in the current folder using a file or terminal tool and tell me its exact contents."'
+  $proc = Start-Process -FilePath $hermes -ArgumentList $hermesArgs -WorkingDirectory $work -PassThru -RedirectStandardOutput $outputFile -RedirectStandardError (Join-Path $logDir "agent-errors.txt") -WindowStyle Hidden
   if (-not $proc.WaitForExit(180000)) {
     Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
     Write-Warning "Agent smoke test exceeded 3 minutes. Installation and Ollama checks passed."
