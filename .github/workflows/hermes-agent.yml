@@ -1,0 +1,44 @@
+name: Hermes Agent over Tailscale (Experimental)
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: hermes-agent-server
+  cancel-in-progress: true
+jobs:
+  hermes:
+    runs-on: windows-2022
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Authenticate private Tailscale connection
+        shell: powershell
+        env:
+          TS_AUTHKEY: ${{ secrets.TAILSCALE_AUTHKEY }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $ProgressPreference = "SilentlyContinue"
+          if (-not $env:TS_AUTHKEY) { throw "Configure TAILSCALE_AUTHKEY Actions secret first" }
+          $msi = "$env:TEMP\tailscale.msi"
+          Invoke-WebRequest "https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi" -OutFile $msi
+          $result = Start-Process msiexec.exe -ArgumentList @("/i", $msi, "/quiet", "/norestart") -Wait -PassThru
+          if ($result.ExitCode -notin @(0,3010)) { throw "Tailscale installation failed" }
+          $ts = "$env:ProgramFiles\Tailscale\tailscale.exe"
+          & $ts up --authkey="$env:TS_AUTHKEY" --hostname="hermes-$env:GITHUB_RUN_ID" --unattended
+          if ($LASTEXITCODE -ne 0) { throw "Tailscale authentication failed" }
+          $ip = (& $ts ip -4 | Select-Object -First 1)
+          if (-not $ip -or $ip -notmatch '^100\.') { throw "Tailnet IPv4 unavailable" }
+          Write-Host "::add-mask::$ip"
+          "TAILSCALE_IP=$ip" >> $env:GITHUB_ENV
+          Write-Host "Private Tailscale connection established."
+
+      - name: Start password-protected Hermes and Ollama
+        shell: powershell
+        env:
+          HERMES_DASHBOARD_PASSWORD: ${{ secrets.HERMES_DASHBOARD_PASSWORD }}
+        run: |
+          & .\scripts\hermes-server.ps1
