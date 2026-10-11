@@ -14,7 +14,9 @@ Remove-Item Env:GH_TOKEN
 $env:HERMES_HOME = Join-Path $env:RUNNER_TEMP "hermes"
 $env:OLLAMA_MODELS = Join-Path $env:RUNNER_TEMP "ollama-models"
 $env:OLLAMA_HOST = "127.0.0.1:11434"
-$env:OLLAMA_CONTEXT_LENGTH = "8192"
+# Hermes requires 64,000+ tokens for tool use. Ollama must actually serve
+# at least that many; smaller contexts cause the 8,192-token startup refusal.
+$env:OLLAMA_CONTEXT_LENGTH = "65536"
 $env:OLLAMA_NUM_PARALLEL = "1"
 $env:OLLAMA_MAX_LOADED_MODELS = "1"
 $env:OLLAMA_KEEP_ALIVE = "30m"
@@ -58,6 +60,7 @@ if (-not $ready) {
   throw "Cached Ollama backend or model unavailable"
 }
 Write-Host "Selected Ollama agent model is ready. No download needed in the serving step."
+Write-Host "Ollama will serve 65536 context tokens; Hermes model.ollama_num_ctx=65536."
 
 # Restored private Hermes config (if any) is overridden only for the local
 # model and safer execution defaults. Keep memory, history, skills and sessions.
@@ -65,7 +68,8 @@ $config = @(
   @("model.default",$activeModel),
   @("model.provider","custom"),
   @("model.base_url","http://127.0.0.1:11434/v1"),
-  @("model.context_length","8192"),
+  @("model.context_length","65536"),
+  @("model.ollama_num_ctx","65536"),
   @("approvals.mode","manual"),
   @("approvals.unattended_mode","deny"),
   @("approvals.single_query_mode","deny"),
