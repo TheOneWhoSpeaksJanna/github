@@ -82,6 +82,15 @@ try {
   } else { throw }
 }
 Write-Host "CODEX REMOTE PAIRING PORTAL ONLINE - Tailscale port 9130, username owner, password required."
+# Confirm the authenticated setup endpoint works without printing any codes.
+try {
+  $basic = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("owner:" + $privatePassword))
+  $safe = Invoke-RestMethod ("http://" + $privateIp + ":9130/api/status") -Headers @{Authorization=("Basic " + $basic)} -TimeoutSec 5
+  Write-Host "Codex private authenticated setup endpoint available; interactive ChatGPT authorization still required."
+} catch {
+  throw "Authenticated Codex status page could not be reached"
+}
+
 "## Codex Remote on GitHub Windows VM" | Out-File -Append -FilePath $env:GITHUB_STEP_SUMMARY
 "Find Tailscale device codex-remote-$env:GITHUB_RUN_ID and open its private 9130 port." | Out-File -Append -FilePath $env:GITHUB_STEP_SUMMARY
 "Use username owner and your existing dashboard password to authorize ChatGPT, then read the private pairing code." | Out-File -Append -FilePath $env:GITHUB_STEP_SUMMARY
