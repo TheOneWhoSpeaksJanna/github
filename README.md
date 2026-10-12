@@ -1,105 +1,78 @@
-# Pocket File Agent: local model that makes downloadable files
+# GitHub coding workspace — ChatGPT/Codex on Android
 
-This repository now runs a **file-creating local AI agent**, not an Ollama
-chat server or Hermes dashboard. It is meant for use from **Android through
-Tailscale** and runs on a temporary Windows Server 2022 GitHub Actions VM.
+The previous Android Ollama Chat, Hermes Agent and Pocket File Agent
+servers are **retired**. They repeatedly failed to provide a reliable
+tool-enabled experience on an ephemeral four-CPU GitHub Actions runner.
+The repository is now ready for coding tasks through GitHub and Codex.
 
-## Get started
+## Start here
 
-1. On Android, open **[Pocket Local File Agent — Actions](https://github.com/TheOneWhoSpeaksJanna/github/actions/workflows/file-agent.yml)**.
-2. Select **Run workflow**, leave **operation=start**, and choose the session
-   length (default 300 minutes).
-3. Wait for the run log message **FILE AGENT STARTED**.
-4. Open Tailscale on Android. Find **file-agent-<run ID>** and copy its private
-   **100.x.x.x** address.
-5. In Android Chrome, visit **http://100.x.x.x:9120** (with that real address).
-6. Sign in as **owner** with the existing GitHub Actions repository secret
-   **HERMES_DASHBOARD_PASSWORD**. That password is reused for the new agent
-   and for encrypted file backups.
+**[Codex on Android setup and local-model options](CODEX_ANDROID_SETUP.md)**
 
-Describe a task, such as **“Create a Python calculator and a README”**.
-The agent uses a local model to produce real text/source files. Tap a file to
-download it to Android, or use **Download ZIP** for all workspace files.
-Select an existing file in the dashboard when asking the agent to revise it.
+### Recommended: Codex Cloud in ChatGPT Android
 
-**[Full Android setup, downloads, encrypted backups and troubleshooting](FILE_AGENT_SETUP.md)**
+Use Codex Cloud to create and edit **real repository files**, run checks,
+review diffs and create pull requests. It uses Codex cloud models, **not**
+a local Ollama model. Create and publish a cloud environment with this
+repository once from ChatGPT on the web or desktop; afterward, open
+**Codex** on Android and select the published environment. Availability
+depends on your account and workspace.
 
-## New agent vs. the retired chat systems
+[Official Codex Cloud quickstart](https://learn.chatgpt.com/docs/cloud)
 
-- The **old Ollama Chat workflow is removed**. Ollama remains installed
-  internally as the local text-generation engine, but its port 11434 is
-  **restricted to 127.0.0.1 on the VM**, not exposed to Android.
-- The **Hermes workflow is retired**, because its large system/tool prompt
-  caused 90–240-second timeouts on the four-CPU Windows runner.
-- The new file agent requests a much smaller structured JSON response,
-  validates paths and writes only allowed UTF-8 text/source files in its own
-  workspace. It provides individual and ZIP downloads over the private
-  password-protected Android dashboard.
-- The tested local model is **standard qwen2.5-coder:1.5b**, configured in
-  [agent-models.txt](agent-models.txt). The archived Hermes model setting is
-  not used by the new agent.
-- This is a **bounded file-task agent**, not a full remote computer or an
-  unrestricted terminal. It does not run arbitrary model-generated commands,
-  send emails, browse the open internet or edit files outside the workspace.
+The [AGENTS.md](AGENTS.md) file gives coding agents safe project-specific
+instructions. No custom server, Android Tailscale login or temporary
+Windows VM is required for Codex Cloud tasks.
 
-## Actions workflows
+### To use an actual local model from Android
 
-Only two active YAML workflows remain:
+Local Ollama models are supported in **ChatGPT Desktop's Codex mode**,
+not in the regular ChatGPT Android model picker. With a compatible,
+signed-in Windows or Mac host, you can control that desktop's Codex work
+from Android using **Remote**. Remote setup begins on the desktop app;
+it cannot be established by merely running Codex CLI on GitHub Actions.
 
-| Workflow | What it does |
-| --- | --- |
-| [Pocket Local File Agent](.github/workflows/file-agent.yml) | Start/stop a private Windows VM with an agent dashboard, model, downloadable workspace and 10-minute encrypted backups |
-| [Pocket File Agent tests and CPU speed](.github/workflows/agent-verify.yml) | Manually verify sandbox security, actual model file creation, ZIP output and CPU hardware without accessing private secrets |
+[Official Remote setup](https://learn.chatgpt.com/docs/remote-connections) |
+[Ollama/Codex integration](https://docs.ollama.com/integrations/codex)
 
-Both are **manual-only**; commits do not start long-running model servers.
+A hosted GitHub Actions runner is an unreliable and short-lived
+replacement for a persistent interactive desktop PC. Running Codex
+CLI against a small local model also cannot guarantee it will call
+file/terminal tools correctly: tool-heavy Hermes tasks previously
+stalled for multiple minutes on the same runner.
 
-## Speed and testing
+## Old server shutdown
 
-Tests on the actual GitHub Windows runner completed successfully:
+The old file-agent run
+[#38213702466](https://github.com/TheOneWhoSpeaksJanna/github/actions/runs/38213702466)
+was still active when the migration began. **New File Agent starts are disabled**.
+A [manual, stop-only workflow](.github/workflows/file-agent.yml)
+remains to request its graceful encrypted checkpoint and shutdown.
+Select **Run workflow** on that page; the workflow cannot start a new VM.
 
-- [Real Ollama structured output → file → ZIP](https://github.com/TheOneWhoSpeaksJanna/github/actions/runs/38158954754):
-  **6.92 seconds** for a short Markdown task after startup.
-- [Full password-protected HTTP dashboard → task → Android-style download](https://github.com/TheOneWhoSpeaksJanna/github/actions/runs/38159306487):
-  **6.05 seconds**, including real local-model generation and ZIP download.
-- Security tests include password requirements, same-origin checks,
-  blocked filesystem traversal, Windows path normalization and file size
-  limits.
+The GitHub connector does not expose an action to dispatch/cancel this run,
+so a final user click is needed to stop the existing Windows job.
+After it ends, its Windows VM terminates automatically.
 
-Times vary by prompt length and output file size. The tests used a
-loopback-only Windows VM with no private secrets; they do not by themselves
-verify a future Tailscale connection or every possible file-generation task.
+## Repository contents
 
-## Save work and shut down safely
+- [CODEX_ANDROID_SETUP.md](CODEX_ANDROID_SETUP.md): Android Codex Cloud
+  and optional local-model Desktop Remote steps, with documented limits.
+- [AGENTS.md](AGENTS.md): instruction file for Codex to make code changes.
+- `agent/` and old `scripts/`: **archived experiments**, not a running app.
+- [Historical File Agent setup](FILE_AGENT_SETUP.md) and
+  [Hermes performance report](HERMES_PERFORMANCE.md): old research only.
 
-To stop, select **Run workflow > operation=stop**. The live agent receives
-the control signal and saves a final encrypted backup before GitHub tears
-down its temporary VM. Workspace checkpoints are AES-256-GCM encrypted and
-uploaded to a dedicated release **at startup, every 10 minutes and at normal
-shutdown**. The last eight rolling checkpoints are retained, and a separate
-Actions backup artifact is uploaded after a normal run.
+Previous encrypted checkpoint release assets are **preserved**:
+[Hermes](https://github.com/TheOneWhoSpeaksJanna/github/releases/tag/hermes-encrypted-checkpoints)
+and
+[File Agent](https://github.com/TheOneWhoSpeaksJanna/github/releases/tag/file-agent-encrypted-checkpoints).
+They are not decrypted, deleted or reused in Codex Cloud.
 
-The old Hermes encrypted backup release is **kept separately**, so
-switching agents doesn't delete old saved history. The original model
-configuration files and legacy performance documentation also remain for
-reference; those retired services do not run.
+## Safety and privacy
 
-## Security and privacy
-
-This repository is **public**. Repo files, commit history, Actions logs and
-unencrypted artifacts are potentially public. New agent outputs live inside
-the ephemeral runner and the private Tailscale dashboard; **only encrypted
-workspace backups** are uploaded to GitHub. Keep the decryption password
-private and download important outputs to your own storage.
-
-Do not expose the web dashboard or internal Ollama port directly on the
-internet. Maintain Tailscale access restrictions. Historic repository
-revisions may contain exposed credentials; rotate any credentials that were
-ever committed or logged. Never run untrusted pull-request code with Actions
-secrets.
-
-GitHub-hosted Windows VMs are temporary, not an always-on personal server.
-Session length is limited, and Actions minutes/cache/storage quotas apply.
-
-Documentation: [File Agent guide](FILE_AGENT_SETUP.md) |
-[Archived Hermes performance findings](HERMES_PERFORMANCE.md) |
-[Historical CPU tuning](CPU_TUNING.md).
+This repository is **public**. Do not commit tokens, passwords,
+private files or unredacted logs. Old commits may contain compromised
+credentials; revoke or rotate any leaked passwords or keys.
+Do not publish local Ollama or the retired file-server endpoint.
+Review code changes and tests before merging them.
