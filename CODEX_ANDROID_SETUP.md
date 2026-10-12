@@ -1,192 +1,115 @@
-# Codex on Android: practical options (October 2026)
+# Codex Remote from Android using a GitHub Windows VM
 
-## Ready-to-run Windows Codex Remote setup
+This setup uses **Codex CLI Remote Control on a GitHub Actions VM**,
+not your own computer. Codex connects to a locally running Ollama
+model in that VM. The official Codex CLI now supports headless
+manual pairing codes without the desktop app.
 
-I added a [Windows setup/check script](scripts/setup-codex-remote-windows.ps1)
-for **your own persistent Windows 10/11 computer**. It cannot turn an Android
-phone or a temporary GitHub Actions runner into a signed-in desktop host.
+[Start the Codex Remote VM](https://github.com/TheOneWhoSpeaksJanna/github/actions/workflows/codex-remote.yml)
 
-After cloning or downloading this GitHub repository **onto that Windows PC**,
-open PowerShell in the repository directory and run:
+## 1. Start the GitHub Windows VM
 
-```powershell
-powershell -File .\scripts\setup-codex-remote-windows.ps1
-```
+1. Open the Codex Remote workflow link above and press **Run workflow**.
+2. Choose **operation = start**, with the desired session length
+   (the default is 300 minutes).
+3. Open its active run in GitHub Actions. Look for
+   **CODEX REMOTE PAIRING PORTAL ONLINE**.
+4. On Android, open Tailscale and find the new machine named
+   **codex-remote-RUNID**. Copy its private 100.x.x.x IP.
+5. Open the address **http://100.x.x.x:9130** in Android Chrome,
+   replacing the example IP with the real Tailscale IP.
+6. Sign in with username **owner** and the existing GitHub Actions
+   password secret **HERMES_DASHBOARD_PASSWORD**.
 
-This checks your computer, installed ChatGPT desktop app, Ollama and available
-memory. To explicitly install the official desktop software through Windows
-Package Manager:
+The portal is only reachable on the private Tailscale network. The
+GitHub Actions logs do not contain your login or Remote pairing codes.
 
-```powershell
-powershell -File .\scripts\setup-codex-remote-windows.ps1 -Install
-```
+## 2. Sign in from Android
 
-It installs the official Windows ChatGPT desktop package from the Microsoft
-Store and Ollama from the official Windows package repository. It does **not**
-log in, collect passwords or configure an unattended online machine.
+The private portal displays a one-time ChatGPT device-login code and
+a link to **https://auth.openai.com/codex/device**. Follow the link,
+sign into your ChatGPT account and enter the one-time code shown in
+the private portal. Use the same account as in your ChatGPT Android app.
 
-Once you have installed a suitable local Ollama model on the PC, opt into the
-desktop Codex model configuration with:
+Headless Codex requires explicit ChatGPT account authorization. Device
+login may need to be enabled under your ChatGPT security settings, and
+your account may require MFA or other authorized verification.
+No one can skip these requirements using a GitHub workflow.
 
-```powershell
-powershell -File .\scripts\setup-codex-remote-windows.ps1 -Model MODEL_NAME
-```
+Never paste your ChatGPT password or tokens into GitHub files, Actions
+logs, issues or this chat.
 
-This runs the supported `ollama launch codex-app --model MODEL_NAME` flow.
-Ollama 0.24.0 or newer is required for Codex App integration.
+## 3. Pair Codex Remote in the Android app
 
-**Pairing is always manual:** on the signed-in ChatGPT desktop app go to
-**Settings > Connections > Control this Mac or PC > Set up**; scan the QR code
-with ChatGPT on Android, confirm the same account/workspace and complete
-verification. Keep the desktop PC awake, online and signed in. When the
-connection is supported and paired, find the desktop under **Codex** or
-**Remote** in ChatGPT Android.
+When authorization succeeds, the VM executes the official commands:
 
-**No local PC or Mac?** ChatGPT Remote has no host to control. The GitHub
-repository by itself cannot supply a persistent, signed-in desktop session.
-Use Codex Cloud instead if Android-only access is essential; that option does
-not run a local model.
+    codex remote-control start --json
+    codex remote-control pair --json
+
+The private Tailscale page displays the **short-lived manual pairing
+code** returned by Codex. Open ChatGPT on Android, enter
+**Codex / Remote**, choose to add a host, and enter the manual code.
+Select the resulting GitHub-hosted Codex environment.
+
+If a code expires, press **Create a fresh pairing code** in the
+private page. The mobile Remote feature must be enabled for your
+ChatGPT account/workspace.
+
+The code cannot be generated for your account before you complete
+the official device login. It is never published to the public
+repository or public Actions job logs.
+
+## Local Ollama model
+
+The VM hosts Ollama privately at **127.0.0.1:11434**.
+Codex points to the local model using the Ollama-compatible
+Responses API at **http://127.0.0.1:11434/v1**.
+The first uncommented model in [agent-models.txt](agent-models.txt)
+is selected (currently standard **qwen2.5-coder:1.5b**).
+
+The configuration gives Codex a 65,536-token context allocation,
+because official Ollama Codex documentation recommends at least
+64K. The selected 1.5B model is limited and can be slow or fail
+complex file/terminal tool calls on the 4-CPU VM. A successful
+Remote pairing would prove connectivity, not guaranteed agent speed.
+
+ChatGPT sign-in is needed for **Remote host authorization**, while
+the Codex host's configured inference provider is local Ollama.
+The regular ChatGPT model picker remains separate.
+
+## Stop and save
+
+Use the same [Codex Remote Actions workflow](https://github.com/TheOneWhoSpeaksJanna/github/actions/workflows/codex-remote.yml)
+with **operation = stop** to request a safe shutdown. Otherwise
+the temporary Windows VM exits at its session deadline.
+
+GitHub-hosted runners are temporary. The workflow deliberately
+does not publish ChatGPT tokens, authentication files, pairing codes
+or private project files into the public GitHub repository or Actions
+artifacts. Account authentication is **not** persisted between runs.
+Each new temporary VM requires another login and pairing. Save
+valuable project work to your GitHub repository before the VM ends.
+
+The older File Agent runner is separate; its stop-only workflow
+can be used to terminate the old machine normally. Previous
+Hermes and File Agent encrypted backup assets are preserved.
+
+## Verification and requirements
+
+Verified on GitHub Windows:
+- The official npm Codex CLI installed and supported the Remote
+  start/pair and device-code login commands.
+- The private authentication page passed Windows security and
+  Python/PowerShell syntax tests.
+- The selected local Ollama model is available from its existing
+  cached installation.
+
+A separate private Tailscale smoke test checks the actual VM
+startup, but signed-in Remote enrollment cannot be fully verified
+until the owner authorizes the GitHub VM and pairs Android.
 
 Official sources:
-- [Remote connections](https://learn.chatgpt.com/docs/remote-connections)
-- [Windows Codex desktop app](https://learn.chatgpt.com/docs/windows/windows-app)
-- [Ollama Codex App integration](https://docs.ollama.com/integrations/codex-app)
-- [GitHub Actions hosted-runner lifetime limit](https://docs.github.com/en/actions/reference/limits)
-
-
-The previous Pocket File Agent and Hermes/Ollama Chat service are **retired**.
-This repo is now a GitHub coding workspace for tasks through ChatGPT / Codex.
-
-## What is supported?
-
-| Goal | Supported? | Where work actually runs |
-| --- | --- | --- |
-| Use Codex with a local Ollama model | Yes | Codex CLI or ChatGPT **desktop Codex mode** |
-| Choose an Ollama model in ordinary ChatGPT Android chat | **No** | Ordinary ChatGPT uses its supported models |
-| Use local Codex work from ChatGPT Android | **Yes, where Remote is available** | Your signed-in, awake Windows/Mac desktop host |
-| Run Codex coding tasks directly from ChatGPT Android | **Yes, where Codex Cloud is available** | Codex cloud, **not** your local model |
-| Convert a GitHub Actions runner into a permanent ChatGPT Desktop Remote host | **Not supported as an unattended setup** | A temporary CI runner is not a signed-in desktop |
-
-There is no repository code or GitHub secret that can add a custom Ollama
-model to the ChatGPT Android **regular model picker**.
-
-## Option A — Recommended for Android-only use: Codex Cloud
-
-This does **not** run a local model, but it does the work you actually want:
-change real files, run checks, review diffs, and create pull requests.
-
-1. Open ChatGPT **on the web or desktop**, and open **Codex**. Choose
-   **Work in > Cloud > Select environment > Create environment**.
-   (Initial environment creation is not currently supported on mobile.)
-2. Connect GitHub if needed, select **TheOneWhoSpeaksJanna/github**,
-   and let Codex inspect the repository and test the setup. Review and
-   **Publish** the environment.
-3. On your Android ChatGPT app, open **Codex** and select the newly
-   published Cloud environment. If you do not have Codex on mobile,
-   update the app and check account/workspace availability.
-4. Ask for a concrete task such as:
-   "Make a calculator website, add the real HTML/CSS/JS files to this
-   repo, run a basic test, and prepare a pull request."
-5. Review changed files, request corrections, then commit or open a PR.
-   Files are in the GitHub repository when the changes are published.
-
-This repository has [AGENTS.md](AGENTS.md) so coding agents know they should
-create real files and test changes while protecting secrets and backup
-assets. It does **not** automatically publish or enable a Codex Cloud
-environment on your account; you must authorize GitHub and publish one
-through the official ChatGPT interface.
-
-Official docs:
-- [Codex Cloud overview](https://learn.chatgpt.com/docs/cloud)
-- [Cloud environments](https://learn.chatgpt.com/docs/environments/cloud-environments)
-- [GitHub connection in ChatGPT](https://help.openai.com/en/articles/11145903-connecting-github-to-chatgpt)
-
-## Option B — A real **local** model accessible from ChatGPT Android Remote
-
-Requires a **persistent, user-controlled Windows or Mac computer** with
-adequate CPU/RAM or GPU, not the temporary Actions VM.
-
-1. Install Ollama and a compatible model on that desktop computer.
-2. Install ChatGPT Desktop and sign in to the same ChatGPT account you
-   use on Android. In Ollama's **Apps** section, enable ChatGPT
-   (Desktop), then select compatible local models. Use **Codex mode**
-   in the desktop app; Ollama models are not available in regular Chat.
-3. On the desktop app, open **Settings > Connections >
-   Control this Mac or PC > Set up** and authorize Remote.
-4. Scan the QR code in ChatGPT on your Android device and complete pairing.
-5. On Android, open **Remote**, select that desktop host, and control
-   your Codex task. Keep the host awake, online and signed in.
-
-Remote is account/workspace/rollout dependent and requires the desktop app,
-not Codex CLI alone. A 64K context-capable model and more compute are
-preferable for full Codex tools. On the previous 4-vCPU GitHub runner,
-small-model full-agent tasks stalled, so this is **not** a promise of
-interactive speed on that same hardware.
-
-Official docs:
-- [ChatGPT Remote connections](https://learn.chatgpt.com/docs/remote-connections)
-- [Ollama ChatGPT Desktop integration](https://github.com/ollama/ollama/blob/main/docs/integrations/chatgpt.mdx)
-- [Codex CLI with Ollama](https://docs.ollama.com/integrations/codex)
-
-## Option C — Codex CLI + Ollama on your own PC (not Android ChatGPT)
-
-Install a supported Ollama version and Node.js on your Windows/macOS/Linux
-machine. Install Codex CLI using its official instructions, then run:
-
-```sh
-npm install -g @openai/codex
-ollama launch codex
-```
-
-Or use an explicitly selected compatible locally installed model:
-
-```sh
-codex --oss -m MODEL_NAME
-```
-
-For file and tool tasks, Ollama's Codex integration recommends **64K+
-context**. A model that can answer a simple question is not necessarily
-capable of driving Codex's file/shell tools. Older Qwen2.5 Coder builds
-have had tool-call compatibility issues, and 1.5B is not a credible
-guarantee of a full interactive code agent.
-
-Using the CLI alone does **not** connect it to ChatGPT Android Remote.
-Remote pairing must begin from a supported signed-in ChatGPT desktop app.
-
-## What was changed in the GitHub repository
-
-- **Removed the ability to start another File Agent Windows VM.**
-- Kept a single temporary [safe Stop workflow](.github/workflows/file-agent.yml)
-  so a previously started run can receive its final encrypted checkpoint
-  and shut down without an abrupt Cancel.
-- Retired the old mobile server/test workflow. Previous Ollama/Hermes
-  experimentation scripts and docs are historical, not an active service.
-- Added the repository-level [AGENTS.md](AGENTS.md) instructions for
-  Codex Cloud and GitHub coding tasks.
-- Left encrypted backup releases and historic files alone.
-
-### Stop the currently running old VM
-
-The active runner at the time this setup was written is
-[File agent start run #38213702466](https://github.com/TheOneWhoSpeaksJanna/github/actions/runs/38213702466).
-
-The GitHub connector available in this chat cannot directly dispatch
-the workflow's Stop input or cancel a run. To finish stopping it:
-
-1. Open the [Stop retired File Agent VM workflow](https://github.com/TheOneWhoSpeaksJanna/github/actions/workflows/file-agent.yml).
-2. Tap **Run workflow**. It now **only** sends a Stop request, not Start.
-3. Return to run #38213702466 to confirm the old job ends normally.
-
-A normal exit uploads a final AES-256-GCM encrypted backup. GitHub may
-take some time to show the run as complete. Do not delete either release:
-
-- [Previous Hermes encrypted checkpoints](https://github.com/TheOneWhoSpeaksJanna/github/releases/tag/hermes-encrypted-checkpoints)
-- [Previous File Agent encrypted checkpoints](https://github.com/TheOneWhoSpeaksJanna/github/releases/tag/file-agent-encrypted-checkpoints)
-
-If you cannot access the Stop workflow, GitHub's **Cancel workflow**
-terminates the VM but can discard file changes since its latest successful
-off-VM backup. Prefer the safe Stop when available.
-
-**Privacy:** the repository is public, so don't put passwords,
-private files, personal information, or signing credentials in prompts
-that will become public commits, issue bodies, or Actions logs.
+- [Codex CLI manual pairing](https://learn.chatgpt.com/docs/cli/reference)
+- [Codex headless device login](https://learn.chatgpt.com/docs/auth)
+- [Codex mobile Remote guide](https://learn.chatgpt.com/docs/remote-connections)
+- [Ollama Codex integration](https://docs.ollama.com/integrations/codex)
