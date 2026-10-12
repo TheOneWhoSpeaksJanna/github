@@ -1,5 +1,59 @@
 # Codex on Android: practical options (October 2026)
 
+## Ready-to-run Windows Codex Remote setup
+
+I added a [Windows setup/check script](scripts/setup-codex-remote-windows.ps1)
+for **your own persistent Windows 10/11 computer**. It cannot turn an Android
+phone or a temporary GitHub Actions runner into a signed-in desktop host.
+
+After cloning or downloading this GitHub repository **onto that Windows PC**,
+open PowerShell in the repository directory and run:
+
+```powershell
+powershell -File .\scripts\setup-codex-remote-windows.ps1
+```
+
+This checks your computer, installed ChatGPT desktop app, Ollama and available
+memory. To explicitly install the official desktop software through Windows
+Package Manager:
+
+```powershell
+powershell -File .\scripts\setup-codex-remote-windows.ps1 -Install
+```
+
+It installs the official Windows ChatGPT desktop package from the Microsoft
+Store and Ollama from the official Windows package repository. It does **not**
+log in, collect passwords or configure an unattended online machine.
+
+Once you have installed a suitable local Ollama model on the PC, opt into the
+desktop Codex model configuration with:
+
+```powershell
+powershell -File .\scripts\setup-codex-remote-windows.ps1 -Model MODEL_NAME
+```
+
+This runs the supported `ollama launch codex-app --model MODEL_NAME` flow.
+Ollama 0.24.0 or newer is required for Codex App integration.
+
+**Pairing is always manual:** on the signed-in ChatGPT desktop app go to
+**Settings > Connections > Control this Mac or PC > Set up**; scan the QR code
+with ChatGPT on Android, confirm the same account/workspace and complete
+verification. Keep the desktop PC awake, online and signed in. When the
+connection is supported and paired, find the desktop under **Codex** or
+**Remote** in ChatGPT Android.
+
+**No local PC or Mac?** ChatGPT Remote has no host to control. The GitHub
+repository by itself cannot supply a persistent, signed-in desktop session.
+Use Codex Cloud instead if Android-only access is essential; that option does
+not run a local model.
+
+Official sources:
+- [Remote connections](https://learn.chatgpt.com/docs/remote-connections)
+- [Windows Codex desktop app](https://learn.chatgpt.com/docs/windows/windows-app)
+- [Ollama Codex App integration](https://docs.ollama.com/integrations/codex-app)
+- [GitHub Actions hosted-runner lifetime limit](https://docs.github.com/en/actions/reference/limits)
+
+
 The previous Pocket File Agent and Hermes/Ollama Chat service are **retired**.
 This repo is now a GitHub coding workspace for tasks through ChatGPT / Codex.
 
