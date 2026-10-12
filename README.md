@@ -26,6 +26,14 @@ Windows VM is required for Codex Cloud tasks.
 
 ### To use an actual local model from Android
 
+For a persistent Windows 10/11 computer, use the repository's
+[opt-in Windows Codex Remote setup script](scripts/setup-codex-remote-windows.ps1)
+from an interactive PowerShell session. The script checks the host, can install
+the official desktop app and Ollama on request, and can select an already
+installed local model for Codex. **It never signs you in or pairs your phone:**
+you must complete the ChatGPT desktop app's QR-code Remote connection yourself.
+See [exact commands and limitations](CODEX_ANDROID_SETUP.md).
+
 Local Ollama models are supported in **ChatGPT Desktop's Codex mode**,
 not in the regular ChatGPT Android model picker. With a compatible,
 signed-in Windows or Mac host, you can control that desktop's Codex work
