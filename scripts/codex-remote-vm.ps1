@@ -36,7 +36,7 @@ $configLines = @(
 )
 # Use UTF-8 without BOM for Rust/TOML CLI parsing; PowerShell 5.1
 # Set-Content -Encoding UTF8 adds a BOM on Windows Server 2022.
-[IO.File]::WriteAllLines((Join-Path $env:CODEX_HOME "config.toml"), $configLines, (New-Object System.Text.UTF8Encoding($false)))
+[IO.File]::WriteAllLines((Join-Path $env:CODEX_HOME "config.toml"), $configLines, ([System.Text.UTF8Encoding]::new($false)))
 $ollama = Join-Path $env:RUNNER_TEMP "ollama-bin\ollama.exe"
 if (-not (Test-Path $ollama)) { throw "Ollama missing after cache restore" }
 $ollamaOut = Join-Path $env:RUNNER_TEMP "codex-ollama.stdout.log"
