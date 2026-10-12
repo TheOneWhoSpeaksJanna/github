@@ -1,0 +1,117 @@
+name: Verify LIVE Codex Remote private portal
+on:
+  push:
+    paths:
+      - .github/workflows/codex-remote-smoke.yml
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  stop:
+    if: false
+    name: Request safe stop
+    runs-on: ubuntu-latest
+    steps:
+      - name: Stop signal for Codex VM
+        run: |
+          echo "Codex Remote stop request published. The running Windows VM checks for it and closes its session."
+          echo "No local model or new Windows VM starts in this job."
+
+  codex-remote:
+    if: github.event_name == 'push'
+    name: Windows Codex CLI plus private Ollama
+    runs-on: windows-2022
+    timeout-minutes: 350
+    concurrency:
+      group: codex-local-remote-smoketest
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Check pairing portal security and launch script syntax
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          & python -m unittest discover -s codex-remote -p "test_pair_portal.py" -v
+          if ($LASTEXITCODE -ne 0) { throw "Private Codex pairing security tests failed" }
+          & python -m py_compile codex-remote/pair_portal.py
+          if ($LASTEXITCODE -ne 0) { throw "Codex portal syntax failed" }
+          foreach ($file in @("scripts\codex-remote-vm.ps1","scripts\file-agent-bootstrap.ps1")) {
+            $tokens = $null
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file).Path,[ref]$tokens,[ref]$errors)
+            if ($errors.Count -gt 0) { $errors | ForEach-Object { Write-Host $_.Message }; throw "PowerShell syntax invalid: $file" }
+          }
+          & python scripts/hermes-model-config.py list agent-models.txt
+          if ($LASTEXITCODE -ne 0) { throw "Invalid local Ollama model list" }
+
+      - name: Restore cached public Ollama and local model
+        id: cache
+        uses: actions/cache/restore@v4
+        with:
+          key: pocket-file-agent-v1-${{ hashFiles('agent-models.txt') }}
+          restore-keys: |
+            pocket-file-agent-v1-
+          path: |
+            ${{ runner.temp }}/ollama-bin
+            ${{ runner.temp }}/ollama-models
+
+      - name: Prepare local model (private loopback)
+        shell: powershell
+        run: |
+          & .\scripts\file-agent-bootstrap.ps1
+          if (-not $?) { throw "Could not prepare Ollama and the chosen local model" }
+
+      - name: Save only public clean Ollama runtime and model
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          key: pocket-file-agent-v1-${{ hashFiles('agent-models.txt') }}
+          path: |
+            ${{ runner.temp }}/ollama-bin
+            ${{ runner.temp }}/ollama-models
+
+      - name: Install official Codex CLI with manual Remote pairing
+        shell: powershell
+        run: |
+          npm install -g @openai/codex@latest
+          if ($LASTEXITCODE -ne 0) { throw "Codex CLI installation failed" }
+          codex --version
+          codex remote-control pair --help
+          if ($LASTEXITCODE -ne 0) { throw "Codex version lacks manual pairing support" }
+          Write-Host "Codex installed. Account login and pairing will occur only on the password-protected Tailscale page."
+
+      - name: Join Tailscale private network
+        shell: powershell
+        env:
+          TS_AUTHKEY: ${{ secrets.TAILSCALE_AUTHKEY }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $ProgressPreference = "SilentlyContinue"
+          if (-not $env:TS_AUTHKEY) { throw "Set TAILSCALE_AUTHKEY repository Actions secret" }
+          $msi = Join-Path $env:RUNNER_TEMP "codex-tailscale.msi"
+          Invoke-WebRequest "https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi" -OutFile $msi
+          $p = Start-Process msiexec.exe -ArgumentList @("/i",$msi,"/quiet","/norestart") -Wait -PassThru
+          if ($p.ExitCode -notin @(0,3010)) { throw "Tailscale installer failed" }
+          $tailscale = Join-Path $env:ProgramFiles "Tailscale\tailscale.exe"
+          & $tailscale up --authkey="$env:TS_AUTHKEY" --hostname="codex-remote-$env:GITHUB_RUN_ID" --unattended
+          if ($LASTEXITCODE -ne 0) { throw "Tailscale device authentication failed" }
+          $ip = (& $tailscale ip -4 | Select-Object -First 1)
+          if ($ip -notmatch '^100\.') { throw "Private Tailscale IP missing" }
+          Write-Host "::add-mask::$ip"
+          "TAILSCALE_IP=$ip" >> $env:GITHUB_ENV
+          Write-Host "Private Tailscale network attached; no IPs or login codes disclosed."
+
+      - name: Run official Codex Remote daemon and private pairing portal
+        shell: powershell
+        timeout-minutes: 330
+        env:
+          PAIR_PORTAL_PASSWORD: ${{ secrets.HERMES_DASHBOARD_PASSWORD }}
+          GH_TOKEN: ${{ github.token }}
+          CODEX_SESSION_MINUTES: "2"
+        run: |
+          & .\scripts\codex-remote-vm.ps1
+          if (-not $?) { throw "Codex Remote VM exited with an error" }
