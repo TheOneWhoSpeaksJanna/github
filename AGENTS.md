@@ -23,16 +23,12 @@ downloadable outputs when the host interface supports it.
   `file-agent-encrypted-checkpoints`.
 - Treat `agent/`, old `scripts/file-agent-*.ps1`, and historical Hermes
   documents as archived experiments. They are not an active product.
-- The only **operational** Actions workflow is temporarily the safe Stop
-  control for an old File Agent runner. An archived benchmark workflow exists
-  but its job is disabled; do not restart or revive local servers.
+- The operational Actions workflow is now Codex Remote using a temporary GitHub Windows VM and local Ollama model. The retired File Agent's stop-only control remains for an earlier session; an archived benchmark workflow exists but is disabled. Do not revive retired local servers.
 
 ## Implementation guidance
 - For normal code-generation tasks, use the ChatGPT/Codex Cloud working
   environment connected to this GitHub repo (when available to the user).
-- The user may optionally run Codex CLI with Ollama on a separate personal
-  Windows/macOS/Linux machine, but this repository must not silently create
-  remote tunnels or claim a local model is selectable in ChatGPT Android.
+- The user explicitly wants Codex CLI Remote on a temporary GitHub Windows VM with local Ollama. Its account authorization and pairing page must stay password-protected on Tailscale; never print login/pairing codes or account credentials in public Actions logs or artifacts. The local model is for the Codex host, not the regular ChatGPT Android model picker.
 - When asked to create files: create them in the repo, validate their paths,
   and provide the file paths plus tests run. For binary exports, use supported
   artifact outputs rather than committing secrets or generated caches.
