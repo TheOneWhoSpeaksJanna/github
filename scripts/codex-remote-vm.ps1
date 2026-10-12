@@ -34,7 +34,9 @@ $configLines = @(
   'base_url = "http://127.0.0.1:11434/v1"'
   'wire_api = "responses"'
 )
-Set-Content -Path (Join-Path $env:CODEX_HOME "config.toml") -Value $configLines -Encoding UTF8
+# Use UTF-8 without BOM for Rust/TOML CLI parsing; PowerShell 5.1
+# Set-Content -Encoding UTF8 adds a BOM on Windows Server 2022.
+[IO.File]::WriteAllLines((Join-Path $env:CODEX_HOME "config.toml"), $configLines, (New-Object System.Text.UTF8Encoding($false)))
 $ollama = Join-Path $env:RUNNER_TEMP "ollama-bin\ollama.exe"
 if (-not (Test-Path $ollama)) { throw "Ollama missing after cache restore" }
 $ollamaOut = Join-Path $env:RUNNER_TEMP "codex-ollama.stdout.log"
