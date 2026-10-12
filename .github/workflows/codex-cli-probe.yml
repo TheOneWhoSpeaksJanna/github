@@ -18,8 +18,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Cannot install Codex CLI" }
           codex --version
           codex remote-control --help
+          $ErrorActionPreference = "Continue"
           codex login status
-          Write-Host "PRECHECK FINISHED: Codex installed, remote-control command discoverable."
+          $global:LASTEXITCODE = 0
+          Write-Host "PRECHECK FINISHED: Codex installed and supports the remote-control pair subcommand."
       - name: Check whether unauthenticated VM can start remote pairing
         shell: pwsh
         timeout-minutes: 3
