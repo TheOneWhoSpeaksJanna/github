@@ -1,0 +1,37 @@
+name: Verify Codex CLI Remote on VM
+on:
+  push:
+    paths:
+      - .github/workflows/codex-cli-probe.yml
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: windows-2022
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install official Codex CLI on ephemeral Windows VM
+        shell: pwsh
+        run: |
+          npm install -g @openai/codex@latest
+          if ($LASTEXITCODE -ne 0) { throw "Cannot install Codex CLI" }
+          codex --version
+          codex remote-control --help
+          codex login status
+          Write-Host "PRECHECK FINISHED: Codex installed, remote-control command discoverable."
+      - name: Check whether unauthenticated VM can start remote pairing
+        shell: pwsh
+        timeout-minutes: 3
+        run: |
+          $ErrorActionPreference = "Continue"
+          $log = Join-Path $env:RUNNER_TEMP "codex-remote-probe-private.txt"
+          & codex remote-control start --json *> $log
+          $code = $LASTEXITCODE
+          Write-Host "REMOTE_START_EXIT_CODE: $code"
+          $raw = Get-Content $log -Raw
+          foreach ($hint in @("authentication","login","sign in","token","remote control","unsupported","failed","running","connected")) {
+            if ($raw.ToLower().Contains($hint)) { Write-Host "Found diagnostic category: $hint" }
+          }
+          Remove-Item $log -Force -ErrorAction SilentlyContinue
+          exit 0
