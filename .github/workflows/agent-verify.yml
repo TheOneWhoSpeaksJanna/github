@@ -1,73 +1,11 @@
-name: Pocket File Agent - Test files and CPU speed
+name: Archived File Agent benchmarks (disabled)
 on:
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
-  verify-agent:
-    runs-on: windows-2022
-    timeout-minutes: 30
+  retired:
+    if: ${{ false }}
+    runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-
-      - name: Report Windows computer specifications
-        shell: powershell
-        run: |
-          $cpu = Get-CimInstance Win32_Processor | Select-Object -First 1
-          $os = Get-CimInstance Win32_OperatingSystem
-          Write-Host "Hardware: $($cpu.NumberOfLogicalProcessors) logical CPUs, $([math]::Round($os.TotalVisibleMemorySize/1MB,2)) GB total RAM"
-          Write-Host "Free RAM GB: $([math]::Round($os.FreePhysicalMemory/1MB,2))"
-
-      - name: Test agent file security and Android download HTTP endpoints
-        shell: powershell
-        run: |
-          & python -m unittest discover -s agent -p "test_file_agent.py" -v
-          if ($LASTEXITCODE -ne 0) { throw "Offline security and HTTP tests failed" }
-          & python -m py_compile agent/file_agent.py agent/verify_model.py
-          if ($LASTEXITCODE -ne 0) { throw "Agent Python syntax failed" }
-
-      - name: Restore only public Ollama and model cache
-        id: cache
-        uses: actions/cache/restore@v4
-        with:
-          key: pocket-file-agent-v1-${{ hashFiles('agent-models.txt') }}
-          restore-keys: |
-            pocket-file-agent-v1-
-            hermes-win2022-pinned79b45d-mobile-v3-
-          path: |
-            ${{ runner.temp }}/ollama-bin
-            ${{ runner.temp }}/ollama-models
-
-      - name: Prepare standard CPU Ollama model
-        shell: powershell
-        run: |
-          $ErrorActionPreference = "Stop"
-          $tok = $null; $err = $null
-          [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path "scripts\file-agent-bootstrap.ps1").Path, [ref]$tok, [ref]$err)
-          if ($err.Count) { throw "PowerShell bootstrap parse errors" }
-          & .\scripts\file-agent-bootstrap.ps1
-          if (-not $?) { throw "Ollama bootstrap failed" }
-
-      - name: Save public model cache before any private state
-        if: steps.cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          key: pocket-file-agent-v1-${{ hashFiles('agent-models.txt') }}
-          path: |
-            ${{ runner.temp }}/ollama-bin
-            ${{ runner.temp }}/ollama-models
-
-      - name: Verify actual local model makes a downloadable Markdown file and ZIP
-        timeout-minutes: 7
-        shell: powershell
-        env:
-          OLLAMA_MODELS: ${{ runner.temp }}/ollama-models
-        run: |
-          $ErrorActionPreference = "Stop"
-          $model = & python scripts/hermes-model-config.py default agent-models.txt
-          if ($LASTEXITCODE -ne 0 -or -not $model) { throw "Invalid agent model" }
-          $workspace = Join-Path $env:RUNNER_TEMP "AgentVerificationFiles"
-          & python agent/verify_model.py --ollama (Join-Path $env:RUNNER_TEMP "ollama-bin\ollama.exe") --model $model --workspace $workspace
-          if ($LASTEXITCODE -ne 0) { throw "Local model -> files integration failed" }
+      - run: echo "Retired. See CODEX_ANDROID_SETUP.md for the current Codex mobile workflow."
