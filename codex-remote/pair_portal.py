@@ -11,6 +11,7 @@ import hmac
 import json
 import os
 import re
+import shutil
 import subprocess
 import threading
 import time
@@ -274,7 +275,7 @@ def main():
     if len(pw) < 14:
         a.error("PAIR_PORTAL_PASSWORD must be at least 14 chars")
     st = Status(args.model)
-    st.codex = args.codex
+    st.codex = shutil.which(args.codex) or args.codex
     # Codex must never inherit the web password or GitHub token.
     st.env = {k: v for k, v in os.environ.items()
               if k not in {"PAIR_PORTAL_PASSWORD", "GH_TOKEN", "GITHUB_TOKEN",
