@@ -88,7 +88,7 @@ Write-Host "CODEX REMOTE PAIRING PORTAL ONLINE - Tailscale port 9130, username o
 "Pairing/login codes and account tokens are never printed to public GitHub logs." | Out-File -Append -FilePath $env:GITHUB_STEP_SUMMARY
 $minutes = 300
 if ($env:CODEX_SESSION_MINUTES) { $minutes = [int]$env:CODEX_SESSION_MINUTES }
-if ($minutes -lt 10 -or $minutes -gt 310) { throw "Session minutes must be 10-310" }
+if ($minutes -lt 2 -or $minutes -gt 310) { throw "Session minutes must be 2-310" }
 $deadline = (Get-Date).AddMinutes($minutes)
 $nextPoll = (Get-Date).AddSeconds(35)
 $badHealth = 0
