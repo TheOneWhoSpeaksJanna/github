@@ -23,8 +23,9 @@ downloadable outputs when the host interface supports it.
   `file-agent-encrypted-checkpoints`.
 - Treat `agent/`, old `scripts/file-agent-*.ps1`, and historical Hermes
   documents as archived experiments. They are not an active product.
-- The only retained Actions workflow is temporarily the **safe stop control**
-  for an old File Agent runner; do not restart or revive it by accident.
+- The only **operational** Actions workflow is temporarily the safe Stop
+  control for an old File Agent runner. An archived benchmark workflow exists
+  but its job is disabled; do not restart or revive local servers.
 
 ## Implementation guidance
 - For normal code-generation tasks, use the ChatGPT/Codex Cloud working
