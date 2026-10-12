@@ -1,3 +1,5 @@
+> **RETIRED — October 12, 2026.** This guide describes an experimental local file agent that did not work reliably for the owner on Android. Its Windows server cannot be started again. The former workflow now provides **only a safe Stop request** for the existing VM. For supported options, read [Codex on Android](CODEX_ANDROID_SETUP.md). Old encrypted backups remain preserved.
+
 # Pocket File Agent: Android + local model + real downloadable files
 
 This replaces both the former Ollama Chat server and the Hermes dashboard
